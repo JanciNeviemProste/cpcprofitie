@@ -1,0 +1,23 @@
+{
+  "common": {
+    "appName": "CPCProfit",
+    "tagline": "Dáta, ktoré zvyšujú zisk obchodníkov s vozidlami"
+  },
+  "nav": {
+    "overview": "Prehľad",
+    "analysis": "Analýza",
+    "compare": "Porovnanie",
+    "market": "Trh",
+    "aiListing": "AI Inzerát",
+    "garage": "Moja garáž",
+    "watchlist": "Sledované modely",
+    "pricing": "Cenník",
+    "faq": "FAQ"
+  },
+  "cta": {
+    "tryFree": "Vyskúšať 7 dní zadarmo",
+    "signIn": "Prihlásiť sa",
+    "getStarted": "Začať",
+    "learnMore": "Zistiť viac"
+  }
+}
