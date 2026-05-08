@@ -16,27 +16,20 @@ export default function OpengraphImage() {
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          background:
-            'linear-gradient(135deg, #0a0e1a 0%, #1a2540 50%, #0a0e1a 100%)',
+          background: 'linear-gradient(135deg, #0a0e1a 0%, #1a2540 50%, #0a0e1a 100%)',
           color: 'white',
           fontFamily: 'system-ui, sans-serif',
+          padding: 80,
         }}
       >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 16,
-            marginBottom: 32,
-          }}
-        >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 32 }}>
           <div
             style={{
+              display: 'flex',
               width: 72,
               height: 72,
               borderRadius: 16,
               background: 'linear-gradient(135deg, #4f7aef, #6db3f5)',
-              display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontSize: 40,
@@ -45,28 +38,31 @@ export default function OpengraphImage() {
           >
             C
           </div>
-          <div style={{ fontSize: 56, fontWeight: 700, letterSpacing: -1 }}>CPCProfit</div>
+          <div style={{ display: 'flex', fontSize: 56, fontWeight: 700, letterSpacing: -1 }}>
+            CPCProfit
+          </div>
         </div>
+
         <div
           style={{
+            display: 'flex',
             fontSize: 64,
             fontWeight: 800,
             textAlign: 'center',
-            maxWidth: 900,
             lineHeight: 1.1,
             letterSpacing: -2,
           }}
         >
-          Predávajte autá so{' '}
-          <span style={{ color: '#6db3f5' }}>zaručenou maržou</span>.
+          Predávajte autá so zaručenou maržou.
         </div>
+
         <div
           style={{
+            display: 'flex',
             fontSize: 28,
             color: '#94a3b8',
             marginTop: 32,
             textAlign: 'center',
-            maxWidth: 800,
           }}
         >
           Reálne ceny zo SK trhu · AI insights · Smart watchlist
