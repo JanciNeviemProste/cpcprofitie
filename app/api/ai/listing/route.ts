@@ -2,6 +2,7 @@ import { streamText } from 'ai';
 import { z } from 'zod';
 import { DEFAULT_MODEL } from '@/lib/ai';
 import { buildSystemPrompt, buildUserPrompt } from '@/lib/ai/prompts';
+import { rateLimit } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -20,6 +21,22 @@ const InputSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const ip =
+    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+    request.headers.get('x-real-ip') ??
+    'unknown';
+  const verdict = await rateLimit({
+    key: `ai-listing:${ip}`,
+    limit: 10,
+    windowMs: 60_000,
+  });
+  if (!verdict.allowed) {
+    return Response.json(
+      { error: 'rate_limited', retryAfterMs: verdict.resetMs },
+      { status: 429, headers: { 'retry-after': Math.ceil(verdict.resetMs / 1000).toString() } },
+    );
+  }
+
   const json = await request.json().catch(() => null);
   const parsed = InputSchema.safeParse(json);
   if (!parsed.success) {

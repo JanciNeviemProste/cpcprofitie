@@ -1,10 +1,16 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/auth/server';
+import { checkBotIdSafe } from '@/lib/botid';
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
   const next = url.searchParams.get('next') ?? '/app/overview';
+
+  const bot = await checkBotIdSafe(request);
+  if (bot.isBot) {
+    return NextResponse.redirect(new URL('/login?error=bot_detected', url.origin));
+  }
 
   if (!code) {
     return NextResponse.redirect(new URL('/login?error=missing_code', url.origin));

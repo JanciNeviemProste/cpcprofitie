@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from 'next/font/google';
 import { NextIntlClientProvider } from 'next-intl';
 import { getLocale, getMessages } from 'next-intl/server';
 import { Analytics } from '@vercel/analytics/next';
+import { CookiesBanner } from '@/components/cookies-banner';
 import './globals.css';
 
 const geistSans = Geist({
@@ -52,7 +53,10 @@ export default async function RootLayout({
       suppressHydrationWarning
     >
       <body className="bg-background text-foreground flex min-h-full flex-col">
-        <NextIntlClientProvider messages={messages}>{children}</NextIntlClientProvider>
+        <NextIntlClientProvider messages={messages}>
+          {children}
+          <CookiesBanner />
+        </NextIntlClientProvider>
         <Analytics />
       </body>
     </html>
