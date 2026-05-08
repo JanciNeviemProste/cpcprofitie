@@ -127,3 +127,9 @@
     @apply font-sans;
   }
 }
+
+@layer components {
+  .input {
+    @apply border-border/60 bg-background/30 focus:border-primary focus:ring-primary/20 w-full rounded-lg border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2;
+  }
+}

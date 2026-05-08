@@ -1,4 +1,4 @@
-import { Sparkles } from 'lucide-react';
+import { AiListingForm } from '@/components/ai/ai-listing-form';
 
 export const metadata = { title: 'AI Inzerát' };
 
@@ -8,22 +8,12 @@ export default function AiListingPage() {
       <div className="flex flex-col gap-1">
         <h1 className="text-3xl font-bold tracking-tight">AI generovanie inzerátu</h1>
         <p className="text-muted-foreground text-sm">
-          Zadajte parametre vozidla a Claude vygeneruje predajný titulok a popis.
+          Zadajte parametre vozidla — Claude Haiku 4.5 vygeneruje titulok a popis za pár sekúnd.
         </p>
       </div>
 
-      <div className="border-primary/30 from-primary/10 mt-10 flex items-start gap-4 rounded-xl border bg-gradient-to-br to-transparent p-6">
-        <div className="bg-primary/20 text-primary flex size-10 shrink-0 items-center justify-center rounded-lg">
-          <Sparkles className="size-5" />
-        </div>
-        <div>
-          <h2 className="text-base font-semibold tracking-tight">Pripravujeme</h2>
-          <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
-            Tento modul je vo Fáze 6 implementačného plánu. Form na zadanie parametrov a streaming
-            výstup z Vercel AI Gateway (anthropic/claude-haiku-4-5) sa pridá po dokončení Stripe
-            paywallu pre per-plán quota counter.
-          </p>
-        </div>
+      <div className="mt-8">
+        <AiListingForm />
       </div>
     </div>
   );
