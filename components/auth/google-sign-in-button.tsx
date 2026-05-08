@@ -16,6 +16,11 @@ export function GoogleSignInButton({ label }: { label: string }) {
     setError(null);
     try {
       const supabase = createSupabaseBrowserClient();
+      if (!supabase) {
+        setError('Prihlásenie zatiaľ nie je nakonfigurované (chýbajú Supabase env premenné).');
+        setLoading(false);
+        return;
+      }
       const origin = window.location.origin;
       const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: 'google',

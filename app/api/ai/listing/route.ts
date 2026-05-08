@@ -2,10 +2,13 @@ import { streamText } from 'ai';
 import { z } from 'zod';
 import { DEFAULT_MODEL } from '@/lib/ai';
 import { buildSystemPrompt, buildUserPrompt } from '@/lib/ai/prompts';
+import { getCurrentUser } from '@/lib/auth/server';
 import { rateLimit } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
+
+const PROD = process.env.VERCEL_ENV === 'production';
 
 const InputSchema = z.object({
   make: z.string().min(1).max(64),
@@ -21,26 +24,45 @@ const InputSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const user = await getCurrentUser();
+
+  // Once the AI Gateway is wired, calling this endpoint costs us money for
+  // every token. Require an authenticated user in production so anonymous
+  // traffic can't burn quota. In dev we keep it open so the demo works.
+  if (PROD && process.env.AI_GATEWAY_API_KEY && !user) {
+    return Response.json({ error: 'unauthorized' }, { status: 401 });
+  }
+
   const ip =
     request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
     request.headers.get('x-real-ip') ??
     'unknown';
-  const verdict = await rateLimit({
-    key: `ai-listing:${ip}`,
-    limit: 10,
-    windowMs: 60_000,
-  });
+  // Per-user when authenticated, per-IP otherwise. Tighter limit for anon.
+  const bucketKey = user ? `ai-listing:user:${user.id}` : `ai-listing:ip:${ip}`;
+  const limit = user ? 30 : 10;
+  const verdict = await rateLimit({ key: bucketKey, limit, windowMs: 60_000 });
   if (!verdict.allowed) {
     return Response.json(
       { error: 'rate_limited', retryAfterMs: verdict.resetMs },
-      { status: 429, headers: { 'retry-after': Math.ceil(verdict.resetMs / 1000).toString() } },
+      {
+        status: 429,
+        headers: { 'retry-after': Math.ceil(verdict.resetMs / 1000).toString() },
+      },
     );
   }
 
-  const json = await request.json().catch(() => null);
+  let json: unknown = null;
+  try {
+    json = await request.json();
+  } catch {
+    return Response.json({ error: 'malformed_json' }, { status: 400 });
+  }
   const parsed = InputSchema.safeParse(json);
   if (!parsed.success) {
-    return Response.json({ error: 'invalid input', issues: parsed.error.issues }, { status: 400 });
+    return Response.json(
+      { error: 'validation_failed', issues: parsed.error.issues },
+      { status: 400 },
+    );
   }
   const input = parsed.data;
 
@@ -48,7 +70,7 @@ export async function POST(request: Request) {
   const userPrompt = buildUserPrompt(input);
 
   // Without an AI Gateway key, stream a deterministic mock so the UI is
-  // demoable in local-only mode. Replace with a real call once env is wired.
+  // demoable in local-only mode.
   if (!process.env.AI_GATEWAY_API_KEY) {
     return new Response(mockStream(input), {
       headers: {
@@ -58,19 +80,25 @@ export async function POST(request: Request) {
     });
   }
 
-  const result = streamText({
-    model: DEFAULT_MODEL,
-    system,
-    prompt: userPrompt,
-    temperature: 0.7,
-  });
-
-  return result.toTextStreamResponse({
-    headers: { 'x-cpcprofit-mode': 'live' },
-  });
+  try {
+    const result = streamText({
+      model: DEFAULT_MODEL,
+      system,
+      prompt: userPrompt,
+      temperature: 0.7,
+    });
+    return result.toTextStreamResponse({
+      headers: { 'x-cpcprofit-mode': 'live' },
+    });
+  } catch (e) {
+    console.error('ai_listing_stream_failed', e instanceof Error ? e.message : e);
+    return Response.json({ error: 'ai_unavailable' }, { status: 502 });
+  }
 }
 
-function mockStream(input: z.infer<typeof InputSchema>): ReadableStream<Uint8Array> {
+type MockInput = z.infer<typeof InputSchema>;
+
+function mockStream(input: MockInput): ReadableStream<Uint8Array> {
   const fluff = {
     formal: 'Vozidlo je v stave zodpovedajúcom roku výroby a počtu najazdených kilometrov.',
     sales: 'Pripravené na okamžité prebratie s plnou servisnou históriou.',

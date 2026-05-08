@@ -8,6 +8,11 @@ const startedAt = Date.now();
 // Cheap liveness check — confirms the deployment is up and reports which
 // integrations are wired by env presence. Does not call out to providers,
 // so it's safe to hit at any cadence (uptime monitors, Vercel health).
+//
+// Status semantics:
+//   ok       — all REQUIRED integrations are wired
+//   degraded — some optional integration missing
+//   error    — a required integration is missing in production
 export async function GET() {
   const checks = {
     db: Boolean(process.env.DATABASE_URL),
@@ -19,15 +24,29 @@ export async function GET() {
     blob: Boolean(process.env.BLOB_READ_WRITE_TOKEN),
     sentry: Boolean(process.env.SENTRY_DSN),
   };
+
+  const env = process.env.VERCEL_ENV ?? 'development';
+  const required: Array<keyof typeof checks> = env === 'production' ? ['db', 'supabase'] : [];
+  const missingRequired = required.filter((k) => !checks[k]);
+  const missingOptional = (Object.keys(checks) as Array<keyof typeof checks>).filter(
+    (k) => !checks[k] && !required.includes(k),
+  );
+
+  const status: 'ok' | 'degraded' | 'error' =
+    missingRequired.length > 0 ? 'error' : missingOptional.length > 0 ? 'degraded' : 'ok';
+
   return NextResponse.json(
     {
-      status: 'ok',
+      status,
       version: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? 'dev',
-      env: process.env.VERCEL_ENV ?? 'development',
+      env,
       uptimeMs: Date.now() - startedAt,
+      missingRequired,
+      missingOptional,
       checks,
     },
     {
+      status: status === 'error' ? 503 : 200,
       headers: { 'cache-control': 'no-store' },
     },
   );

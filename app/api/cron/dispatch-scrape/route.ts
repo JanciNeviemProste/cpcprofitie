@@ -7,12 +7,21 @@ export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 const SOURCES = ['autobazar.sk'] as const;
+const PROD = process.env.VERCEL_ENV === 'production';
 
 export async function GET(request: Request) {
-  // Vercel Cron calls this with a generated bearer; verify before enqueueing.
-  const auth = request.headers.get('authorization');
-  if (process.env.CRON_SECRET && auth !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  const expected = process.env.CRON_SECRET;
+  if (!expected) {
+    // Refuse to run unauthenticated in production. In dev we let it through so
+    // the endpoint can be exercised without env wiring.
+    if (PROD) {
+      return NextResponse.json({ error: 'cron_secret_unset' }, { status: 503 });
+    }
+  } else {
+    const auth = request.headers.get('authorization');
+    if (auth !== `Bearer ${expected}`) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    }
   }
 
   const enqueued: string[] = [];

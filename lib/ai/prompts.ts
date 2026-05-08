@@ -6,13 +6,13 @@ export type Tone = 'formal' | 'sales' | 'short';
 export type ListingInput = {
   make: string;
   model: string;
-  year: number | string;
-  mileageKm: number | string;
+  year: number;
+  mileageKm: number;
   fuel?: string;
   transmission?: string;
   bodyType?: string;
   features?: string;
-  priceEur?: number | string;
+  priceEur?: number;
   tone: Tone;
 };
 

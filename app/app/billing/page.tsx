@@ -110,10 +110,7 @@ function Card({
       }
     >
       <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
-      <ul className="mt-4 space-y-2 text-sm">
-        {Array.isArray(children) ? null : null}
-        {children}
-      </ul>
+      <ul className="mt-4 space-y-2 text-sm">{children}</ul>
     </div>
   );
 }

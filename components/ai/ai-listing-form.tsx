@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
 import { Copy, RefreshCw, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -45,7 +45,6 @@ export function AiListingForm() {
   const [error, setError] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [mode, setMode] = useState<'live' | 'mock' | null>(null);
-  const [, startTransition] = useTransition();
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -75,8 +74,7 @@ export function AiListingForm() {
         const { done, value } = await reader.read();
         if (done) break;
         acc += decoder.decode(value, { stream: true });
-        const next = acc;
-        startTransition(() => setOutput(next));
+        setOutput(acc);
       }
       setStreaming(false);
     } catch (e) {

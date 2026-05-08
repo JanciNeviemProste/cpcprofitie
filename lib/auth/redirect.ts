@@ -1,0 +1,14 @@
+// Validates a `next=` query param against open-redirect attacks. We accept
+// only same-origin paths starting with a single `/` and not `//host`. Anything
+// else falls back to the default landing page.
+
+const SAFE_PREFIX = /^\/(?!\/)/;
+
+export function safeNextPath(input: string | null | undefined, fallback = '/app/overview'): string {
+  if (!input) return fallback;
+  // Reject protocol-relative (`//evil.com`) and absolute (`https://evil.com`) URLs.
+  if (!SAFE_PREFIX.test(input)) return fallback;
+  // Reject control characters and CR/LF that could split headers.
+  if (/[\x00-\x1f\x7f]/.test(input)) return fallback;
+  return input;
+}

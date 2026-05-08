@@ -88,18 +88,21 @@ export function mockMarketKpi(modelSlug: string): MarketKpi {
 
 export type TimePoint = { date: string; median: number; p25: number; p75: number };
 
+// Anchor mock dates to a fixed Monday so SSR and CSR render the same labels.
+// Real market_snapshots will replace this once the scraper backfills.
+const MOCK_ANCHOR = new Date('2026-05-04T00:00:00Z');
+
 export function mockTimeSeries(modelSlug: string, weeks = 26): TimePoint[] {
   const rng = mulberry32(hashSeed(modelSlug + ':ts'));
   const kpi = mockMarketKpi(modelSlug);
   const points: TimePoint[] = [];
   let median = kpi.median * 1.05;
-  const now = new Date();
   for (let i = weeks - 1; i >= 0; i--) {
     const drift = (rng() - 0.5) * 200;
     median = median + drift - 8;
     const spread = median * 0.18;
-    const date = new Date(now);
-    date.setDate(now.getDate() - i * 7);
+    const date = new Date(MOCK_ANCHOR);
+    date.setUTCDate(MOCK_ANCHOR.getUTCDate() - i * 7);
     points.push({
       date: date.toISOString().slice(0, 10),
       median: Math.round(median),
