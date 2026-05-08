@@ -4,8 +4,9 @@ export const config: VercelConfig = {
   buildCommand: 'next build',
   framework: 'nextjs',
   crons: [
-    // Aktivuje sa vo Fáze 4 (scraping pipeline)
-    // { path: '/api/cron/dispatch-scrape', schedule: '0 */6 * * *' },
+    // Every 6 hours: dispatch a scrape job per configured source.
+    // Activated when the project is linked to Vercel and CRON_SECRET is set.
+    { path: '/api/cron/dispatch-scrape', schedule: '0 */6 * * *' },
   ],
 };
 
