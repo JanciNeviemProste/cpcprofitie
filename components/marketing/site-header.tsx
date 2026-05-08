@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
+import { ThemeToggle } from '@/components/theme-toggle';
 
 const navLinks = [
   { href: '/#features', label: 'Funkcie' },
@@ -31,6 +32,7 @@ export function SiteHeader() {
         </nav>
 
         <div className="flex items-center gap-3">
+          <ThemeToggle className="hidden sm:inline-flex" />
           <Link
             href="/login"
             className="text-muted-foreground hover:text-foreground hidden text-sm font-medium transition-colors sm:block"

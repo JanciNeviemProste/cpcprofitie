@@ -3,7 +3,9 @@ import { Geist, Geist_Mono } from 'next/font/google';
 import { NextIntlClientProvider } from 'next-intl';
 import { getLocale, getMessages } from 'next-intl/server';
 import { Analytics } from '@vercel/analytics/next';
+import { Toaster } from 'sonner';
 import { CookiesBanner } from '@/components/cookies-banner';
+import { ThemeProvider } from '@/components/theme-provider';
 import './globals.css';
 
 const geistSans = Geist({
@@ -49,14 +51,17 @@ export default async function RootLayout({
   return (
     <html
       lang={locale}
-      className={`dark ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <body className="bg-background text-foreground flex min-h-full flex-col">
-        <NextIntlClientProvider messages={messages}>
-          {children}
-          <CookiesBanner />
-        </NextIntlClientProvider>
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
+          <NextIntlClientProvider messages={messages}>
+            {children}
+            <CookiesBanner />
+            <Toaster theme="dark" richColors closeButton />
+          </NextIntlClientProvider>
+        </ThemeProvider>
         <Analytics />
       </body>
     </html>
