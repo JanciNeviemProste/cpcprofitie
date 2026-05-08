@@ -15,9 +15,28 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'CPCProfit — Dáta pre obchodníkov s vozidlami',
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? 'https://cpcprofit.sk'),
+  title: {
+    default: 'CPCProfit — Dáta pre obchodníkov s vozidlami',
+    template: '%s · CPCProfit',
+  },
   description:
     'Cenové analýzy, porovnania modelov, sledovanie trhu a AI generovanie inzerátov pre slovenských predajcov áut.',
+  keywords: [
+    'autobazár',
+    'analýza áut',
+    'cenník áut',
+    'predaj áut',
+    'AI inzerát',
+    'autobazar.sk',
+    'trh áut Slovensko',
+  ],
+  openGraph: {
+    type: 'website',
+    locale: 'sk_SK',
+    siteName: 'CPCProfit',
+  },
+  twitter: { card: 'summary_large_image' },
 };
 
 export default async function RootLayout({
