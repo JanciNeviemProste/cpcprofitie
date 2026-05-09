@@ -89,9 +89,11 @@ export function planAtLeast(actual: PlanId, required: PlanId): boolean {
 export function planFromStripePriceId(priceId: string | null | undefined): PlanId {
   if (!priceId) return 'free';
   for (const plan of Object.values(PLANS)) {
-    if (plan.stripePriceMonthly === priceId || plan.stripePriceYearly === priceId) {
-      return plan.id;
-    }
+    // Skip plans that have no Stripe price wired yet — otherwise a missing
+    // env var (`null`) collides with a missing price-id (also `null`) and we
+    // misroute legitimate webhooks to the wrong plan.
+    if (plan.stripePriceMonthly && plan.stripePriceMonthly === priceId) return plan.id;
+    if (plan.stripePriceYearly && plan.stripePriceYearly === priceId) return plan.id;
   }
   return 'free';
 }

@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 
-// Vercel Cron entry point. Activated in vercel.ts when the project is linked
-// and Vercel Queues is provisioned. For each configured source it enqueues a
-// job; workers pick them up and run the actual scraper.
+// Vercel Cron entry point. Currently a stub: returns the source list that
+// *would* be enqueued. Once Vercel Queues is provisioned, replace the
+// enqueue loop body with `queue.send()` so workers can pick up the jobs and
+// run the scraper. Scheduled in vercel.ts as `0 */6 * * *`.
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 

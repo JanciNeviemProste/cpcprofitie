@@ -1,12 +1,16 @@
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { parseListingsPage } from '../autobazar-sk';
+import { fileURLToPath } from 'node:url';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { __resetRobotsCache, parseListingsPage } from '../autobazar-sk';
 
+// __dirname isn't defined under ESM; resolve relative to this file's URL.
 const FIXTURE = readFileSync(
-  join(__dirname, '..', '__fixtures__', 'autobazar-sk-listing.html'),
+  fileURLToPath(new URL('../__fixtures__/autobazar-sk-listing.html', import.meta.url)),
   'utf8',
 );
+
+beforeEach(() => __resetRobotsCache());
+afterEach(() => __resetRobotsCache());
 
 describe('parseListingsPage (autobazar.sk fixture)', () => {
   it('extracts every card from the fixture', () => {

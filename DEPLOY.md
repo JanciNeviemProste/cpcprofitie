@@ -10,12 +10,16 @@ máš všetky účty pripravené.
 - Resend účet (transakčný e-mail)
 - Sentry účet (alebo skip — Sentry je optional)
 - Doména (`cpcprofit.sk` alebo klientova) — registrovaná u registrátora alebo cez Vercel Domains
-- `pnpm@10`, `node@22`, `vercel@46` lokálne
+- `pnpm@10`, `node@22`, Vercel CLI lokálne
+
+> Z Claude Code prompte spusti `! vercel login` (znak `!` je prefix Claude Code prompte
+> pre shell-pass-through, **nie** súčasť bashu). V štandardnom termináli použi
+> len `vercel login`.
 
 ## 1. Vercel link
 
 ```bash
-! vercel login           # OAuth v prehliadači
+vercel login             # OAuth v prehliadači
 vercel link              # bind tento adresár na Vercel projekt (vytvorí nový alebo pripojí existujúci)
 ```
 
@@ -132,7 +136,7 @@ Vercel Dashboard → tvoj projekt → Settings → Domains:
 - Vercel Analytics zapni v Dashboard → Analytics
 - Stripe → Webhook → over že eventy chodia (Recent deliveries)
 - Health-check uptime monitor: `https://cpcprofit.sk/api/health` každých 5 min
-- Rolling release: prvý prod deploy s 25 % traffic, postupne 100 % cez 24h
+- (Voliteľne) Rolling Releases: Vercel Dashboard → Project → Settings → **Rolling Releases** (vyžaduje Pro/Enterprise plán). Pre prvý prod deploy zvoľ napr. 25 % cohort, potom postupne 100 %.
 
 ## Rollback
 

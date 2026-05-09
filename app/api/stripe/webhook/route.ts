@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import type Stripe from 'stripe';
-import { eq } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { subscriptions } from '@/lib/db/schema';
 import { planFromStripePriceId } from '@/lib/billing/plans';
@@ -8,6 +7,25 @@ import { getStripe } from '@/lib/stripe/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+// Whitelist of Stripe statuses we accept into the Postgres enum. Any unmapped
+// value (e.g. a future Stripe-added status) folds to 'incomplete' so an
+// unknown enum value never 500s the webhook + triggers Stripe's retry storm.
+// Update lib/db/schema.ts subscriptionStatusEnum + this set together.
+const KNOWN_STATUSES = new Set<Stripe.Subscription.Status>([
+  'trialing',
+  'active',
+  'past_due',
+  'canceled',
+  'incomplete',
+  'incomplete_expired',
+  'unpaid',
+  'paused',
+]);
+
+function safeStatus(s: Stripe.Subscription.Status): Stripe.Subscription.Status {
+  return KNOWN_STATUSES.has(s) ? s : 'incomplete';
+}
 
 const RELEVANT_EVENTS = new Set<Stripe.Event['type']>([
   'customer.subscription.created',
@@ -77,13 +95,16 @@ async function upsertSubscription(s: Stripe.Subscription) {
   const priceId = item?.price.id ?? null;
   const plan = planFromStripePriceId(priceId);
   const customerId = typeof s.customer === 'string' ? s.customer : s.customer.id;
-  // Period info moved from the subscription to its items in modern Stripe APIs.
+  // As of Stripe API 2026-04-22.dahlia, current_period_start/end live on
+  // subscription.items[].current_period_*, not on the subscription root.
+  // Re-verify when bumping `apiVersion` in lib/stripe/server.ts.
   const periodStart = item?.current_period_start
     ? new Date(item.current_period_start * 1000)
     : null;
   const periodEnd = item?.current_period_end
     ? new Date(item.current_period_end * 1000)
     : null;
+  const status = safeStatus(s.status);
 
   const db = getDb();
   await db
@@ -91,7 +112,7 @@ async function upsertSubscription(s: Stripe.Subscription) {
     .values({
       userId,
       plan,
-      status: s.status,
+      status,
       stripeCustomerId: customerId,
       stripeSubscriptionId: s.id,
       currentPeriodStart: periodStart,
@@ -102,7 +123,7 @@ async function upsertSubscription(s: Stripe.Subscription) {
       target: subscriptions.stripeSubscriptionId,
       set: {
         plan,
-        status: s.status,
+        status,
         currentPeriodStart: periodStart,
         currentPeriodEnd: periodEnd,
         cancelAtPeriodEnd: s.cancel_at_period_end ?? false,
@@ -112,9 +133,8 @@ async function upsertSubscription(s: Stripe.Subscription) {
 }
 
 async function markCanceled(s: Stripe.Subscription) {
-  const db = getDb();
-  await db
-    .update(subscriptions)
-    .set({ status: 'canceled', updatedAt: new Date() })
-    .where(eq(subscriptions.stripeSubscriptionId, s.id));
+  // Use the same upsert path as updates so a `deleted` event arriving before
+  // `created` (Stripe ordering quirk) still ends up with a canceled row,
+  // not a no-op + later phantom active row.
+  await upsertSubscription({ ...s, status: 'canceled' } as Stripe.Subscription);
 }

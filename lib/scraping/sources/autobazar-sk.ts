@@ -45,40 +45,59 @@ export type AutobazarOptions = {
   delayMs?: number;
 };
 
-// Cache the parsed robots.txt for the lifetime of the worker. Vercel cold
-// starts will refetch; long-running processes refresh once a day.
-type RobotsCacheEntry = { fetchedAt: number; allowed: boolean; crawlDelaySec?: number };
+// (Inflight promise + fetched cache live below — single-flight on cold start.)
+
+// Module-scope cache of the parsed robots.txt. On Vercel Sandbox/Function
+// runtimes this only persists within a single instance — cold starts and
+// short-lived invocations re-fetch. The 24h TTL effectively bounds long-running
+// processes (local CLI, Sandbox kept warm) from hammering /robots.txt.
+type RobotsCacheEntry = {
+  fetchedAt: number;
+  perPath: (path: string) => boolean;
+  crawlDelaySec?: number;
+};
 let robotsCache: RobotsCacheEntry | null = null;
+let robotsInflight: Promise<RobotsCacheEntry> | null = null;
 const ROBOTS_TTL_MS = 24 * 60 * 60 * 1000;
 
-async function ensureAllowed(f: typeof fetch): Promise<RobotsCacheEntry> {
+async function ensureRobots(f: typeof fetch): Promise<RobotsCacheEntry> {
   const now = Date.now();
   if (robotsCache && now - robotsCache.fetchedAt < ROBOTS_TTL_MS) return robotsCache;
-  try {
-    const res = await f(`${BASE}/robots.txt`, {
-      headers: { 'User-Agent': USER_AGENT, Accept: 'text/plain' },
-    });
-    if (!res.ok) {
-      // Missing or non-2xx robots.txt is treated as "no rules" — allow.
-      robotsCache = { fetchedAt: now, allowed: true };
+  // Single-flight: concurrent calls during cold start share one fetch.
+  if (robotsInflight) return robotsInflight;
+  robotsInflight = (async () => {
+    try {
+      const res = await f(`${BASE}/robots.txt`, {
+        headers: { 'User-Agent': USER_AGENT, Accept: 'text/plain' },
+      });
+      if (!res.ok) {
+        robotsCache = { fetchedAt: now, perPath: () => true };
+        return robotsCache;
+      }
+      const body = await res.text();
+      const robots = parseRobotsTxt(body);
+      const crawlDelaySec = crawlDelayFor(robots, USER_AGENT);
+      robotsCache = {
+        fetchedAt: now,
+        perPath: (path: string) => isAllowed(robots, USER_AGENT, path),
+        crawlDelaySec,
+      };
       return robotsCache;
+    } catch {
+      // Fail-open on robots.txt fetch errors; we still ship a UA + crawl-delay.
+      robotsCache = { fetchedAt: now, perPath: () => true };
+      return robotsCache;
+    } finally {
+      robotsInflight = null;
     }
-    const body = await res.text();
-    const robots = parseRobotsTxt(body);
-    const allowed = isAllowed(robots, USER_AGENT, '/');
-    const crawlDelaySec = crawlDelayFor(robots, USER_AGENT);
-    robotsCache = { fetchedAt: now, allowed, crawlDelaySec };
-    return robotsCache;
-  } catch {
-    // Fail-open on robots.txt fetch errors; we still ship a UA + crawl-delay.
-    robotsCache = { fetchedAt: now, allowed: true };
-    return robotsCache;
-  }
+  })();
+  return robotsInflight;
 }
 
 /** Test seam: clear the in-memory robots.txt cache between tests. */
 export function __resetRobotsCache(): void {
   robotsCache = null;
+  robotsInflight = null;
 }
 
 export async function scrapeAutobazarSk(
@@ -92,11 +111,7 @@ export async function scrapeAutobazarSk(
   const errors: string[] = [];
   let pagesVisited = 0;
 
-  const robots = await ensureAllowed(f);
-  if (!robots.allowed) {
-    throw new ScrapeForbiddenError('autobazar.sk robots.txt disallows scraping the listing page');
-  }
-
+  const robots = await ensureRobots(f);
   // Honour robots-supplied crawl-delay, falling back to caller's option, then 1.5s.
   const delay = robots.crawlDelaySec
     ? Math.max(opts.delayMs ?? 0, robots.crawlDelaySec * 1000)
@@ -104,6 +119,12 @@ export async function scrapeAutobazarSk(
 
   for (let page = 1; page <= pages; page++) {
     const url = `${BASE}/?form%5BvehicleType%5D=${bodyType}&page=${page}`;
+    const path = new URL(url).pathname + new URL(url).search;
+    if (!robots.perPath(path)) {
+      throw new ScrapeForbiddenError(
+        `autobazar.sk robots.txt disallows ${path} for ${USER_AGENT}`,
+      );
+    }
     try {
       const res = await f(url, {
         headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' },

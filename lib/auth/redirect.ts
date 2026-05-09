@@ -1,6 +1,8 @@
 // Validates a `next=` query param against open-redirect attacks. We accept
-// only same-origin paths starting with a single `/` and not `//host`. Anything
-// else falls back to the default landing page.
+// only same-origin paths starting with a single `/` and not `//host`. Also
+// strips ASCII control characters to prevent CR/LF header splitting in any
+// downstream `Location:` redirect — keep both checks; removing either reopens
+// a real exploit class.
 
 const SAFE_PREFIX = /^\/(?!\/)/;
 

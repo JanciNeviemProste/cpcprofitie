@@ -17,7 +17,15 @@ test.describe('GDPR cookies banner', () => {
 
   test('Prijať všetko persists analytics+marketing flags', async ({ page, context }) => {
     await context.clearCookies();
-    await page.addInitScript(() => localStorage.removeItem('cpcprofit-consent'));
+    // addInitScript runs before page scripts on every navigation — clears
+    // localStorage so prior-test residue can't mask a regression.
+    await page.addInitScript(() => {
+      try {
+        localStorage.removeItem('cpcprofit-consent');
+      } catch {
+        /* private mode */
+      }
+    });
     await page.goto('/');
     await page.getByRole('button', { name: /Prijať všetko/i }).click();
 

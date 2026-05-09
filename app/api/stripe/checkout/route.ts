@@ -1,15 +1,21 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getCurrentUser } from '@/lib/auth/server';
+import { isSameOrigin } from '@/lib/auth/csrf';
 import { PLANS } from '@/lib/billing/plans';
 import { getStripe } from '@/lib/stripe/server';
 
 export const runtime = 'nodejs';
 
+// Reject control chars (CR/LF/NUL/etc) so a malicious path can't be smuggled
+// into Stripe's success_url and later weaponised if a refactor passes the
+// path back through redirect()/fetch().
+const SAFE_PATH = /^\/(?!\/)[^\s\x00-\x1f\x7f]*$/;
+
 const BodySchema = z.object({
   priceId: z.string().min(8),
-  successPath: z.string().regex(/^\/(?!\/)/).default('/app/billing?status=success'),
-  cancelPath: z.string().regex(/^\/(?!\/)/).default('/app/billing?status=cancel'),
+  successPath: z.string().regex(SAFE_PATH).default('/app/billing?status=success'),
+  cancelPath: z.string().regex(SAFE_PATH).default('/app/billing?status=cancel'),
 });
 
 function isKnownPriceId(priceId: string): boolean {
@@ -19,6 +25,10 @@ function isKnownPriceId(priceId: string): boolean {
 }
 
 export async function POST(request: Request) {
+  if (!isSameOrigin(request)) {
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+  }
+
   const user = await getCurrentUser();
   if (!user?.email) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });

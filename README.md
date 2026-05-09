@@ -115,7 +115,7 @@ sa vypnú.
 
 Plný step-by-step v [`DEPLOY.md`](./DEPLOY.md). TL;DR:
 
-1. `! vercel login` + `vercel link`
+1. `vercel login` + `vercel link` (z Claude Code prompte: `! vercel login`)
 2. Marketplace: Supabase + Upstash + AI Gateway + Sentry + Resend + Stripe
 3. `vercel env pull .env.local`
 4. `pnpm drizzle-kit push && pnpm tsx scripts/seed-vehicles.ts`

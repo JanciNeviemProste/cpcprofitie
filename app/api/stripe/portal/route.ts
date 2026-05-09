@@ -1,11 +1,16 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth/server';
+import { isSameOrigin } from '@/lib/auth/csrf';
 import { getUserSubscription } from '@/lib/billing/subscription';
 import { getStripe } from '@/lib/stripe/server';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: Request) {
+  if (!isSameOrigin(request)) {
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+  }
+
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });

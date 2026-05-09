@@ -45,7 +45,7 @@ token consumption.
    GROUP BY user_id ORDER BY count DESC LIMIT 10;
    ```
 4. **Mitigation**:
-   - Doc temp lower per-user limit v `app/api/ai/listing/route.ts` (`limit: 30 → 10`).
+   - Dočasne zníž per-user limit v `app/api/ai/listing/route.ts` (`limit: 30 → 10`).
    - Zablokuj abuser cez `users.role = 'banned'` (po pridaní enum value).
    - Najhorší scenár: `vercel env rm AI_GATEWAY_API_KEY` → flow fallback na mock.
 

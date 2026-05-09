@@ -167,7 +167,7 @@ High-level pohľad na komponenty, dátový tok a kľúčové trade-offs.
 ## Deployment topology
 
 - **Region**: Vercel `fra1` (Frankfurt) — minimalizuje latency pre SK trh, GDPR-compliant.
-- **Functions**: Fluid Compute (Node.js 24), default timeout 300s.
+- **Functions**: Fluid Compute (Node.js 22, matchne `engines` pin), default timeout 300s.
 - **Cron**: Vercel Cron, 1× každých 6h pre scrape dispatch.
 - **DB**: Supabase Postgres v EÚ regióne, connection pooler na `:6543`, transactional pooling pre route handlers.
 - **CDN**: Vercel default, security headers cez `next.config.ts`.

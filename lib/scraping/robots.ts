@@ -74,11 +74,15 @@ function pathMatchesRule(path: string, rule: string): boolean {
 
 export function isAllowed(robots: RobotsTxt, userAgent: string, path: string): boolean {
   const lowerAgent = userAgent.toLowerCase();
-  // Pick the most specific matching agent block, else `*`, else default-allow.
+  // Pick the most specific matching agent block. We require the rule's
+  // user-agent token to appear in the request's UA string (one-way containment),
+  // never the reverse — otherwise short rule names like `bot` would match almost
+  // anything. RFC 9309 §2.2.2.
   const candidates = Object.keys(robots.byAgent).filter(
-    (a) => a === '*' || lowerAgent.includes(a) || a.includes(lowerAgent),
+    (a) => a !== '*' && a.length > 0 && lowerAgent.includes(a),
   );
-  const exact = candidates.find((a) => a !== '*');
+  // Prefer the longest matching agent token (most specific).
+  const exact = candidates.sort((a, b) => b.length - a.length)[0];
   const block = robots.byAgent[exact ?? '*'];
   if (!block) return true;
   // Longer Allow trumps shorter Disallow, and vice versa, per RFC.
@@ -95,8 +99,9 @@ export function isAllowed(robots: RobotsTxt, userAgent: string, path: string): b
 
 export function crawlDelayFor(robots: RobotsTxt, userAgent: string): number | undefined {
   const lowerAgent = userAgent.toLowerCase();
-  const exact = Object.keys(robots.byAgent).find(
-    (a) => a !== '*' && (lowerAgent.includes(a) || a.includes(lowerAgent)),
+  const candidates = Object.keys(robots.byAgent).filter(
+    (a) => a !== '*' && a.length > 0 && lowerAgent.includes(a),
   );
+  const exact = candidates.sort((a, b) => b.length - a.length)[0];
   return robots.byAgent[exact ?? '*']?.crawlDelaySec;
 }
