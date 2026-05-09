@@ -1,21 +1,27 @@
 import Link from 'next/link';
 import { ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { getCurrentUser } from '@/lib/auth/server';
+import { effectivePlan, getUserSubscription } from '@/lib/billing/subscription';
+import { PLANS } from '@/lib/billing/plans';
+import { isStripeConfigured } from '@/lib/stripe/server';
 
 export const metadata = { title: 'Predplatné' };
 
-const PLAN = {
-  name: 'Free',
-  status: 'Skúšobné obdobie',
-  trialEndsAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
-  quotas: [
-    { label: 'AI inzeráty', used: 0, limit: 3 },
-    { label: 'Sledované modely', used: 0, limit: 1 },
-    { label: 'Analýzy modelov', used: 2, limit: 3 },
-  ],
-};
+export default async function BillingPage() {
+  const user = await getCurrentUser();
+  const sub = user ? await getUserSubscription(user.id) : null;
+  const planId = effectivePlan(sub);
+  const plan = PLANS[planId];
+  const stripeReady = isStripeConfigured();
+  const hasCustomer = Boolean(sub?.stripeCustomerId);
 
-export default function BillingPage() {
+  const quotas = [
+    { label: 'AI inzeráty', used: 0, limit: plan.quotas.aiListingsPerMonth },
+    { label: 'Sledované modely', used: 0, limit: plan.quotas.watchlistEntries },
+    { label: 'Garáž', used: 0, limit: plan.quotas.garageEntries },
+  ];
+
   return (
     <div className="container mx-auto px-4 py-10 sm:px-6 lg:px-8">
       <div className="flex flex-col gap-1">
@@ -29,23 +35,27 @@ export default function BillingPage() {
         <header className="flex items-center justify-between">
           <div>
             <p className="text-muted-foreground text-xs uppercase tracking-wider">Aktuálny plán</p>
-            <h2 className="mt-1 text-xl font-semibold tracking-tight">{PLAN.name}</h2>
+            <h2 className="mt-1 text-xl font-semibold tracking-tight">{plan.name}</h2>
             <p className="text-muted-foreground mt-1 text-sm">
-              {PLAN.status} · do {PLAN.trialEndsAt.toLocaleDateString('sk-SK')}
+              {sub?.status ?? 'Bez aktívneho predplatného'}
+              {sub?.currentPeriodEnd
+                ? ` · obnovenie ${new Date(sub.currentPeriodEnd).toLocaleDateString('sk-SK')}`
+                : ''}
             </p>
           </div>
           <Button render={<Link href="/#pricing" />}>Upraviť plán</Button>
         </header>
 
         <div className="mt-6 grid gap-3">
-          {PLAN.quotas.map((q) => {
-            const pct = Math.min(100, (q.used / q.limit) * 100);
+          {quotas.map((q) => {
+            const isUnlimited = q.limit < 0;
+            const pct = isUnlimited ? 8 : Math.min(100, (q.used / Math.max(1, q.limit)) * 100);
             return (
               <div key={q.label}>
                 <div className="flex items-center justify-between text-sm">
                   <span>{q.label}</span>
                   <span className="text-muted-foreground tabular-nums">
-                    {q.used} / {q.limit}
+                    {isUnlimited ? `${q.used} / ∞` : `${q.used} / ${q.limit}`}
                   </span>
                 </div>
                 <div className="bg-muted/40 mt-1.5 h-1.5 overflow-hidden rounded-full">
@@ -61,12 +71,21 @@ export default function BillingPage() {
         <h2 className="text-base font-semibold tracking-tight">Customer Portal</h2>
         <p className="text-muted-foreground mt-1 text-sm">
           Upravte spôsob platby, stiahnite faktúry alebo zrušte predplatné cez Stripe Customer
-          Portal. Prístup sa aktivuje po prepojení Stripe účtu (Fáza 3).
+          Portal.
         </p>
-        <Button variant="outline" disabled className="mt-4">
-          <ExternalLink className="size-4" />
-          Otvoriť portal (čakáme na Stripe)
-        </Button>
+        {stripeReady && hasCustomer ? (
+          <form action="/api/stripe/portal" method="post" className="mt-4">
+            <Button type="submit" variant="outline">
+              <ExternalLink className="size-4" />
+              Otvoriť portál
+            </Button>
+          </form>
+        ) : (
+          <Button variant="outline" disabled className="mt-4">
+            <ExternalLink className="size-4" />
+            {stripeReady ? 'Žiadne predplatné' : 'Čakáme na Stripe wiring'}
+          </Button>
+        )}
       </section>
 
       <section className="mt-6">
