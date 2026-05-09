@@ -113,27 +113,37 @@ sa vypnú.
 
 ## Deploy
 
-1. `vercel link` (po `! vercel login`) prepojí lokálny adresár s Vercel projektom.
-2. Cez Vercel Marketplace pridať: **Supabase**, **Upstash Redis**, **Stripe**,
-   **AI Gateway**, **Sentry**. Marketplace auto-provisne väčšinu env premenných.
-3. `vercel env pull .env.local` stiahne env zo všetkých prostredí.
-4. `pnpm drizzle-kit push` aplikuje schému do Supabase Postgres.
-5. V Supabase dashboarde povoliť Google OAuth provider, redirect URL
-   `<APP_URL>/auth/callback`.
-6. Vytvoriť Stripe products (Plus + Premium, monthly + yearly), price IDs uložiť
-   do env.
-7. `vercel deploy` pre preview, `vercel deploy --prod` pre produkciu.
+Plný step-by-step v [`DEPLOY.md`](./DEPLOY.md). TL;DR:
+
+1. `! vercel login` + `vercel link`
+2. Marketplace: Supabase + Upstash + AI Gateway + Sentry + Resend + Stripe
+3. `vercel env pull .env.local`
+4. `pnpm drizzle-kit push && pnpm tsx scripts/seed-vehicles.ts`
+5. `vercel deploy --prod`
+
+Architektúra: [`ARCHITECTURE.md`](./ARCHITECTURE.md). Incidenty + údržba:
+[`OPERATIONS.md`](./OPERATIONS.md).
 
 ## Testy
 
-Vitest pokrýva čisté funkcie v `lib/`:
+**Unit (vitest, `pnpm test`)** — 62 cases:
 - `lib/scraping/__tests__/aggregate.test.ts` — percentily a snapshot agregátor
 - `lib/scraping/__tests__/normalize.test.ts` — SK parsery (cena, km, rok, palivo)
+- `lib/scraping/__tests__/robots.test.ts` — robots.txt parser + isAllowed
+- `lib/scraping/sources/__tests__/autobazar-sk.test.ts` — fixture-based parsing
 - `lib/__tests__/rate-limit.test.ts` — token-bucket fallback
+- `lib/__tests__/consent.test.ts` — cookies consent v1 parser
+- `lib/__tests__/mock.test.ts` — deterministic mock data
+- `lib/auth/__tests__/redirect.test.ts` — open-redirect guard
 - `lib/ai/__tests__/prompts.test.ts` — system + user prompt builders
+- `lib/billing/__tests__/plans.test.ts` — plan ladder + price-id resolution
+- `lib/billing/__tests__/quota.test.ts` — quota verdict edge cases
+- `app/api/health/__tests__/route.test.ts` — ok/degraded/error semantika
 
-UI je verifikované manuálnym click-throughom; E2E (Playwright) je naplánované
-pre Fázu launch.
+**E2E (Playwright, `pnpm test:e2e`)** — 5 spec súborov pokrývajú marketing,
+auth UI, app moduly, AI listing streaming, GDPR cookies banner. Lokálne
+vyžaduje `pnpm exec playwright install chromium` (~150 MB) raz; CI to
+spraví automaticky.
 
 ## Licencia
 
