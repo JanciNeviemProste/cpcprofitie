@@ -16,7 +16,13 @@ import {
 } from '@/lib/db/schema';
 import type { NormalizedDetail, NormalizedListing, ScrapeResult, Source } from './types';
 
-export type UpsertCounts = { added: number; updated: number; skipped: number };
+export type UpsertCounts = {
+  added: number;
+  updated: number;
+  skipped: number;
+  /** Last error message if any chunk fail occurred — for diagnostics. */
+  lastError?: string;
+};
 
 const BATCH_SIZE = 50;
 
@@ -132,6 +138,7 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
   let added = 0;
   let updated = 0;
   let skipped = 0;
+  let lastError: string | undefined;
 
   // Resolve all model IDs up front so the batch insert is one round trip per chunk.
   const resolved = await Promise.all(
@@ -183,15 +190,20 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
         else updated++;
       }
     } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
       console.error('listings_batch_upsert_failed', {
         chunkSize: chunk.length,
         firstSourceId: chunk[0]?.sourceId,
-        error: e instanceof Error ? e.message : e,
+        firstSource: chunk[0]?.source,
+        firstRow: JSON.stringify(chunk[0]),
+        error: errMsg,
+        stack: e instanceof Error ? e.stack?.slice(0, 500) : undefined,
       });
       skipped += chunk.length;
+      lastError = errMsg;
     }
   }
-  return { added, updated, skipped };
+  return { added, updated, skipped, lastError };
 }
 
 export async function recordScrapeRun(
@@ -202,14 +214,18 @@ export async function recordScrapeRun(
   if (!hasDb()) return;
   try {
     const db = getDb();
+    const combinedErrors: string[] = [];
+    if (result.errors.length > 0) combinedErrors.push(...result.errors.slice(0, 5));
+    if (counts.lastError) combinedErrors.push(`upsert: ${counts.lastError}`);
     await db.insert(scrapeRuns).values({
       source,
-      status: result.errors.length === 0 ? 'succeeded' : 'failed',
+      status:
+        result.errors.length === 0 && !counts.lastError ? 'succeeded' : 'failed',
       startedAt: result.startedAt,
       finishedAt: result.finishedAt,
       listingsAdded: counts.added,
       listingsUpdated: counts.updated,
-      errorMessage: result.errors.length > 0 ? result.errors.slice(0, 5).join('; ') : null,
+      errorMessage: combinedErrors.length > 0 ? combinedErrors.join('; ') : null,
     });
   } catch (e) {
     console.error('scrape_run_record_failed', e instanceof Error ? e.message : e);
