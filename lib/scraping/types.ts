@@ -1,7 +1,14 @@
 // Shared types for the scraping pipeline. The pipeline emits NormalizedListing
 // rows that downstream upsert + aggregation steps consume regardless of source.
 
-export type Source = 'autobazar.sk' | 'mobile.de' | 'autoscout24';
+export type Source = 'autobazar.sk' | 'autobazar.eu' | 'bazos.sk' | 'sauto.cz';
+
+export const ALL_SOURCES: readonly Source[] = [
+  'autobazar.sk',
+  'autobazar.eu',
+  'bazos.sk',
+  'sauto.cz',
+] as const;
 
 export type RawFuel =
   | 'gasoline'
@@ -22,6 +29,8 @@ export type NormalizedListing = {
   makeSlug: string | null;
   modelSlug: string | null;
   priceEur: number | null;
+  /** Original price in source currency if non-EUR (CZK). Stored for audit. */
+  priceCzk?: number | null;
   year: number | null;
   mileageKm: number | null;
   fuel: RawFuel | null;

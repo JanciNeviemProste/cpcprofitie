@@ -1,5 +1,7 @@
 import * as cheerio from 'cheerio';
 import {
+  czkToEur,
+  parseCzk,
   parseEur,
   parseFuel,
   parseKm,
@@ -10,21 +12,20 @@ import {
 import type { NormalizedListing } from '../types';
 import type { ScraperSource } from './source-interface';
 
-const BASE = 'https://www.autobazar.sk';
+const BASE = 'https://www.sauto.cz';
 
-// DOM selectors are placeholders. Tune them against the live page after the
-// first production scrape via WebFetch — structure swaps reasonably often, so
-// keep them in one place.
+// Placeholder selectors — sauto.cz uses a richer card layout; tune after the
+// first production fetch via WebFetch.
 const SEL = {
-  card: '[data-testid="listing-card"], article.listing, .listing-item',
-  title: '[data-testid="listing-title"], h2 a, .listing-title',
-  link: 'a[href*="/auto/"]',
-  price: '[data-testid="listing-price"], .price, .listing-price',
-  year: '[data-testid="listing-year"], .listing-year',
-  mileage: '[data-testid="listing-mileage"], .listing-km, .listing-mileage',
-  fuel: '[data-testid="listing-fuel"], .listing-fuel',
-  transmission: '[data-testid="listing-transmission"], .listing-transmission',
-  region: '[data-testid="listing-region"], .listing-region, .listing-location',
+  card: '[data-testid="listing-card"], article.c-item, .sds-listing-item',
+  title: '[data-testid="listing-title"], h2.c-item__title, .sds-listing-item__title',
+  link: 'a[href*="/osobni-auta/"], a[href*="/inzerat/"]',
+  price: '[data-testid="listing-price"], .c-item__price, .sds-listing-item__price',
+  year: '[data-testid="listing-year"], .c-item__year',
+  mileage: '[data-testid="listing-mileage"], .c-item__km',
+  fuel: '[data-testid="listing-fuel"], .c-item__fuel',
+  transmission: '[data-testid="listing-transmission"], .c-item__transmission',
+  region: '[data-testid="listing-region"], .c-item__location, .sds-listing-item__location',
 } as const;
 
 export function parseListingsPage(html: string): NormalizedListing[] {
@@ -42,20 +43,27 @@ export function parseListingsPage(html: string): NormalizedListing[] {
 
     const title = textOrNull($el.find(SEL.title).first());
     const { makeSlug, modelSlug } = parseMakeModel(title);
-    const priceEur = parseEur(textOrNull($el.find(SEL.price).first()));
+    // Sauto.cz prices are in Kč; convert to EUR but keep the raw value for
+    // audit. parseEur catches the rare case the listing already shows EUR.
+    const priceText = textOrNull($el.find(SEL.price).first());
+    const priceCzk = parseCzk(priceText);
+    const priceEur = priceCzk != null ? czkToEur(priceCzk) : parseEur(priceText);
     const year = parseYear(textOrNull($el.find(SEL.year).first()));
     const mileageKm = parseKm(textOrNull($el.find(SEL.mileage).first()));
     const fuel = parseFuel(textOrNull($el.find(SEL.fuel).first()));
     const transmission = parseTransmission(textOrNull($el.find(SEL.transmission).first()));
-    const region = textOrNull($el.find(SEL.region).first());
+    // Prefix CZ regions so dashboards can split SK vs CZ markets.
+    const rawRegion = textOrNull($el.find(SEL.region).first());
+    const region = rawRegion ? `CZ-${rawRegion}` : null;
 
     results.push({
-      source: 'autobazar.sk',
+      source: 'sauto.cz',
       sourceId,
       url,
       makeSlug,
       modelSlug,
       priceEur,
+      priceCzk,
       year,
       mileageKm,
       fuel,
@@ -69,11 +77,11 @@ export function parseListingsPage(html: string): NormalizedListing[] {
   return results;
 }
 
-export const autobazarSk: ScraperSource = {
-  id: 'autobazar.sk',
+export const sautoCz: ScraperSource = {
+  id: 'sauto.cz',
   baseUrl: BASE,
   pageUrl({ page }) {
-    return `${BASE}/?form%5BvehicleType%5D=osobne&page=${page}`;
+    return `${BASE}/inzerce/osobni?strana=${page}`;
   },
   parseListingsPage,
 };
@@ -85,6 +93,7 @@ function textOrNull($el: { text(): string; length: number }): string | null {
 }
 
 function extractListingId(url: string): string | null {
-  const m = /\/auto\/([^/?#]+)/.exec(url);
+  // Sauto.cz uses URLs like /osobni-auta/skoda/octavia/12345 or /inzerat/12345
+  const m = /\/(?:inzerat|osobni-auta\/[^/]+\/[^/]+)\/(\d+)/.exec(url);
   return m?.[1] ?? null;
 }

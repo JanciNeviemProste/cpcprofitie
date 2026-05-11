@@ -1,24 +1,34 @@
 import type { RawFuel, RawTransmission } from './types';
 
 const FUEL_MAP: Record<string, RawFuel> = {
+  // SK
   benzín: 'gasoline',
-  benzin: 'gasoline',
   nafta: 'diesel',
-  diesel: 'diesel',
   hybrid: 'hybrid',
   'plug-in hybrid': 'phev',
   phev: 'phev',
   elektro: 'electric',
   elektrické: 'electric',
+  // CZ
+  benzin: 'gasoline',
+  diesel: 'diesel',
+  elektrický: 'electric',
+  hybridní: 'hybrid',
+  // Universal
   lpg: 'lpg',
   cng: 'cng',
 };
 
 const TRANSMISSION_MAP: Record<string, RawTransmission> = {
+  // SK
   manuálna: 'manual',
   manual: 'manual',
   automat: 'automatic',
   automatická: 'automatic',
+  // CZ
+  manuální: 'manual',
+  automatická_cz: 'automatic',
+  // Both: 'automatická' covered above
 };
 
 export function parseFuel(raw: string | null | undefined): RawFuel | null {
@@ -39,6 +49,28 @@ export function parseEur(raw: string | null | undefined): number | null {
   if (!digits) return null;
   const n = Number(digits);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Parse a Czech-koruna price string ("450 000 Kč") into CZK number. */
+export function parseCzk(raw: string | null | undefined): number | null {
+  if (!raw) return null;
+  if (!/k[čc]|czk/i.test(raw)) {
+    // Allow callers to pass pure-digit strings; reject if explicit currency
+    // suffix points at something else (e.g. "€").
+    if (/€|eur/i.test(raw)) return null;
+  }
+  const digits = raw.replace(/[^\d]/g, '');
+  if (!digits) return null;
+  const n = Number(digits);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Cheap CZK→EUR conversion with a fixed rate. Real rate would come from an
+ *  ECB feed; this is fine for "compare order of magnitude" dashboards. */
+export const CZK_PER_EUR = 25;
+
+export function czkToEur(czk: number): number {
+  return Math.round(czk / CZK_PER_EUR);
 }
 
 export function parseKm(raw: string | null | undefined): number | null {

@@ -10,21 +10,20 @@ import {
 import type { NormalizedListing } from '../types';
 import type { ScraperSource } from './source-interface';
 
-const BASE = 'https://www.autobazar.sk';
+const BASE = 'https://www.autobazar.eu';
 
-// DOM selectors are placeholders. Tune them against the live page after the
-// first production scrape via WebFetch — structure swaps reasonably often, so
-// keep them in one place.
+// Placeholder selectors — tune via WebFetch against the live DOM after the
+// first production scrape. Keep all selectors in one block.
 const SEL = {
-  card: '[data-testid="listing-card"], article.listing, .listing-item',
-  title: '[data-testid="listing-title"], h2 a, .listing-title',
-  link: 'a[href*="/auto/"]',
-  price: '[data-testid="listing-price"], .price, .listing-price',
-  year: '[data-testid="listing-year"], .listing-year',
-  mileage: '[data-testid="listing-mileage"], .listing-km, .listing-mileage',
-  fuel: '[data-testid="listing-fuel"], .listing-fuel',
-  transmission: '[data-testid="listing-transmission"], .listing-transmission',
-  region: '[data-testid="listing-region"], .listing-region, .listing-location',
+  card: '[data-testid="listing-card"], .classified-item, article.advert',
+  title: '[data-testid="listing-title"], h2.advert-title, .classified-title',
+  link: 'a[href*="/inzerat/"], a[href*="/advert/"]',
+  price: '[data-testid="listing-price"], .advert-price, .classified-price',
+  year: '[data-testid="listing-year"], .advert-year, .classified-year',
+  mileage: '[data-testid="listing-mileage"], .advert-km, .classified-mileage',
+  fuel: '[data-testid="listing-fuel"], .advert-fuel',
+  transmission: '[data-testid="listing-transmission"], .advert-transmission',
+  region: '[data-testid="listing-region"], .advert-location, .classified-location',
 } as const;
 
 export function parseListingsPage(html: string): NormalizedListing[] {
@@ -50,7 +49,7 @@ export function parseListingsPage(html: string): NormalizedListing[] {
     const region = textOrNull($el.find(SEL.region).first());
 
     results.push({
-      source: 'autobazar.sk',
+      source: 'autobazar.eu',
       sourceId,
       url,
       makeSlug,
@@ -69,11 +68,11 @@ export function parseListingsPage(html: string): NormalizedListing[] {
   return results;
 }
 
-export const autobazarSk: ScraperSource = {
-  id: 'autobazar.sk',
+export const autobazarEu: ScraperSource = {
+  id: 'autobazar.eu',
   baseUrl: BASE,
   pageUrl({ page }) {
-    return `${BASE}/?form%5BvehicleType%5D=osobne&page=${page}`;
+    return `${BASE}/?inzerat-druh=osobne&strana=${page}`;
   },
   parseListingsPage,
 };
@@ -85,6 +84,6 @@ function textOrNull($el: { text(): string; length: number }): string | null {
 }
 
 function extractListingId(url: string): string | null {
-  const m = /\/auto\/([^/?#]+)/.exec(url);
+  const m = /\/(?:inzerat|advert)\/([^/?#]+)/.exec(url);
   return m?.[1] ?? null;
 }

@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { __resetRobotsCache, parseListingsPage } from '../autobazar-sk';
+import { parseListingsPage } from '../autobazar-sk';
+import { __resetRobotsCache } from '../../scrape';
 
 // __dirname isn't defined under ESM; resolve relative to this file's URL.
 const FIXTURE = readFileSync(
