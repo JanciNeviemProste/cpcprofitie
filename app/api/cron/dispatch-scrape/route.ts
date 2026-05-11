@@ -45,7 +45,17 @@ export async function GET(request: Request) {
   };
   const summary: PerSource[] = [];
 
-  for (const id of ALL_SOURCES) {
+  // Optional ?source=X filter — lets callers run a single source so that the
+  // 300s function budget applies per source rather than to the whole sweep.
+  // Useful for the (now multi-step) manual catch-up flow; the scheduled cron
+  // hits this without a filter and runs all sources serially.
+  const url = new URL(request.url);
+  const sourceFilter = url.searchParams.get('source');
+  const sources = sourceFilter
+    ? ALL_SOURCES.filter((s) => s === sourceFilter)
+    : ALL_SOURCES;
+
+  for (const id of sources) {
     try {
       const source = getSource(id);
       const result = await runScrape(source, { pages: PAGES_PER_RUN });
