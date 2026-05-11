@@ -160,7 +160,20 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
       };
     }),
   );
-  const validRows = resolved.filter((r): r is NonNullable<typeof r> => r !== null);
+  const resolvedRows = resolved.filter((r): r is NonNullable<typeof r> => r !== null);
+  // Deduplicate by (source, sourceId): some sites return the same listings
+  // across "different" paginated pages (e.g. autobazar.sk /inzeraty/?page=N
+  // serves a server-rendered featured panel that ignores `page`). Postgres
+  // ON CONFLICT cannot affect the same target row twice in one statement, so
+  // duplicates within a batch would cause the whole chunk to fail.
+  const seenKey = new Set<string>();
+  const validRows: typeof resolvedRows = [];
+  for (const r of resolvedRows) {
+    const key = `${r.source}::${r.sourceId}`;
+    if (seenKey.has(key)) continue;
+    seenKey.add(key);
+    validRows.push(r);
+  }
   skipped += rows.length - validRows.length;
 
   for (let i = 0; i < validRows.length; i += BATCH_SIZE) {
