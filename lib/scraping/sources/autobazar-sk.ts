@@ -80,11 +80,39 @@ export function parseListingsPage(html: string): NormalizedListing[] {
   return results;
 }
 
+// autobazar.sk client-side renders the main /inzeraty/ listing — server HTML
+// only contains the featured panel (~20 listings) and ignores ?page=N. Brand
+// subdomains (e.g. audi.autobazar.sk) DO server-render per-brand pages with
+// 20 unique listings each. We iterate top brands instead of paginated index.
+const TOP_BRANDS = [
+  'audi',
+  'bmw',
+  'skoda',
+  'volkswagen',
+  'mercedes',
+  'ford',
+  'kia',
+  'hyundai',
+  'opel',
+  'peugeot',
+  'renault',
+  'toyota',
+  'volvo',
+  'mazda',
+  'nissan',
+  'fiat',
+  'citroen',
+  'seat',
+  'honda',
+  'suzuki',
+];
+
 export const autobazarSk: ScraperSource = {
   id: 'autobazar.sk',
   baseUrl: BASE,
   pageUrl({ page }) {
-    return `${BASE}/inzeraty/?page=${page}`;
+    const brand = TOP_BRANDS[(page - 1) % TOP_BRANDS.length] ?? 'audi';
+    return `https://${brand}.autobazar.sk/`;
   },
   parseListingsPage,
   detailUrl,

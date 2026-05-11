@@ -64,7 +64,8 @@ describe('autobazar.sk parseListingsPage', () => {
 
   it('source descriptor pageUrl is valid', () => {
     const url = autobazarSk.pageUrl({ page: 2 });
-    expect(url).toContain('page=2');
+    // page index now selects a brand subdomain instead of ?page=N
+    expect(url).toMatch(/^https:\/\/[a-z-]+\.autobazar\.sk\/$/);
     expect(() => new URL(url)).not.toThrow();
   });
 });
