@@ -5,7 +5,7 @@ máš všetky účty pripravené.
 
 ## 0. Pre-requisites
 
-- Vercel účet (free stačí, Pro odporúčaný kvôli Cron, Queues, Sandbox)
+- Vercel účet — **Pro plán je potrebný** ak chceš sub-daily cron (`0 */6 * * *` v `vercel.ts`). Hobby/Free limit je 1 cron/deň → import na Hobby zlyhá s "Hobby accounts are limited to daily cron jobs". Pre Hobby buď upgrade alebo zmeň cron na `0 4 * * *` (1× denne). Vercel Queues a Sandbox tiež vyžadujú Pro.
 - Stripe účet (Test mode na začiatku)
 - Resend účet (transakčný e-mail)
 - Sentry účet (alebo skip — Sentry je optional)

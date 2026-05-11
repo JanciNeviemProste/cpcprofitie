@@ -168,7 +168,7 @@ High-level pohľad na komponenty, dátový tok a kľúčové trade-offs.
 
 - **Region**: Vercel `fra1` (Frankfurt) — minimalizuje latency pre SK trh, GDPR-compliant.
 - **Functions**: Fluid Compute (Node.js 22, matchne `engines` pin), default timeout 300s.
-- **Cron**: Vercel Cron, 1× každých 6h pre scrape dispatch.
+- **Cron**: Vercel Cron, 1× každých 6h pre scrape dispatch. **Vyžaduje Pro plán** — Hobby povolí len `0 0 * * *` (1×/deň). Ak je projekt na Hobby, zmeň cron v `vercel.ts` na `0 4 * * *` alebo upgrade.
 - **DB**: Supabase Postgres v EÚ regióne, connection pooler na `:6543`, transactional pooling pre route handlers.
 - **CDN**: Vercel default, security headers cez `next.config.ts`.
 
