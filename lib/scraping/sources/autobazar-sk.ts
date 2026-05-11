@@ -105,6 +105,21 @@ const TOP_BRANDS = [
   'seat',
   'honda',
   'suzuki',
+  'dacia',
+  'land-rover',
+  'mini',
+  'jeep',
+  'mitsubishi',
+  'jaguar',
+  'alfa-romeo',
+  'lexus',
+  'porsche',
+  'smart',
+  'tesla',
+  'chevrolet',
+  'chrysler',
+  'dodge',
+  'subaru',
 ];
 
 export const autobazarSk: ScraperSource = {

@@ -19,8 +19,8 @@ export const maxDuration = 300;
 
 const PROD = process.env.VERCEL_ENV === 'production';
 
-const PAGES_PER_RUN = 20;
-const ENRICH_LIMIT_PER_RUN = 20;
+const PAGES_PER_RUN = 50;
+const ENRICH_LIMIT_PER_RUN = 60;
 
 export async function GET(request: Request) {
   const expected = process.env.CRON_SECRET;
