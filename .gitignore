@@ -34,6 +34,12 @@ yarn-error.log*
 .env*
 !.env.example
 
+# local screenshots used for back-and-forth debugging — don't commit
+# dashboards / env screens
+/supabase*.png
+/screenshot*.png
+/*.png
+
 # vercel
 .vercel
 
