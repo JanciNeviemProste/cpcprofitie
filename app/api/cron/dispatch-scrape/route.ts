@@ -51,6 +51,10 @@ export async function GET(request: Request) {
   // hits this without a filter and runs all sources serially.
   const url = new URL(request.url);
   const sourceFilter = url.searchParams.get('source');
+  const startPageParam = Number(url.searchParams.get('startPage') ?? '1');
+  const startPage = Number.isFinite(startPageParam) && startPageParam >= 1
+    ? Math.floor(startPageParam)
+    : 1;
   const sources = sourceFilter
     ? ALL_SOURCES.filter((s) => s === sourceFilter)
     : ALL_SOURCES;
@@ -58,7 +62,10 @@ export async function GET(request: Request) {
   for (const id of sources) {
     try {
       const source = getSource(id);
-      const result = await runScrape(source, { pages: PAGES_PER_RUN });
+      const result = await runScrape(source, {
+        pages: PAGES_PER_RUN,
+        startPage,
+      });
       const counts = await upsertListings(result.listings);
       await recordScrapeRun(id, result, counts);
 

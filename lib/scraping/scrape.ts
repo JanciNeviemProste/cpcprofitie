@@ -12,6 +12,9 @@ export type RunScrapeOptions = {
   fetchImpl?: typeof fetch;
   /** Minimum backoff between pages in ms. Robots-supplied Crawl-delay wins if larger. */
   delayMs?: number;
+  /** 1-based page index to start at. Lets callers walk a deep paginated source
+   *  across multiple invocations (bazos.sk has ~12k pages of 20 listings each). */
+  startPage?: number;
 };
 
 type RobotsCacheEntry = {
@@ -89,7 +92,9 @@ export async function runScrape(
     ? Math.max(opts.delayMs ?? 0, robots.crawlDelaySec * 1000)
     : (opts.delayMs ?? 1500);
 
-  for (let page = 1; page <= pages; page++) {
+  const firstPage = Math.max(1, opts.startPage ?? 1);
+  const lastPage = firstPage + pages - 1;
+  for (let page = firstPage; page <= lastPage; page++) {
     const url = source.pageUrl({ page });
     let parsed: URL;
     try {
@@ -119,7 +124,7 @@ export async function runScrape(
     } catch (e) {
       errors.push(`page ${page}: ${e instanceof Error ? e.message : 'unknown error'}`);
     }
-    if (page < pages) await sleep(delay);
+    if (page < lastPage) await sleep(delay);
   }
 
   return {
