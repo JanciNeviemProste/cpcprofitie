@@ -5,6 +5,7 @@
 
 import { and, eq, sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
+import { hasDatabaseUrl } from '@/lib/db/url';
 import {
   listingDetails,
   listingPhotos,
@@ -20,7 +21,7 @@ export type UpsertCounts = { added: number; updated: number; skipped: number };
 const BATCH_SIZE = 50;
 
 function hasDb(): boolean {
-  return Boolean(process.env.DATABASE_URL);
+  return hasDatabaseUrl();
 }
 
 // Process-local cache so each scrape run doesn't hammer the DB resolving the

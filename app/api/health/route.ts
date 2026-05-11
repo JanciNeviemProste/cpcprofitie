@@ -15,7 +15,11 @@ const startedAt = Date.now();
 //   error    — a required integration is missing in production
 export async function GET() {
   const checks = {
-    db: Boolean(process.env.DATABASE_URL),
+    db: Boolean(
+      process.env.DATABASE_URL ??
+        process.env.POSTGRES_URL ??
+        process.env.POSTGRES_URL_NON_POOLING,
+    ),
     supabase:
       Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL) &&
       Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
