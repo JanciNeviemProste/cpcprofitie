@@ -15,10 +15,10 @@ import type { ScraperSource } from './source-interface';
 
 const BASE = 'https://www.autobazar.eu';
 
-// autobazar.eu listing detail URLs: /detail-aaa/<slug>/<alphaId>/ or
-// /detail-nove-auto/<slug>/<alphaId>/. We use the URL shape as the card
-// detector — no semantic CSS classes are exposed on the live page.
-const LISTING_URL_RE = /^\/(detail-aaa|detail-nove-auto)\/([\w-]+)\/([\w-]+)\/?$/;
+// autobazar.eu listing detail URLs: /detail/<slug>/<alphaId>/.
+// We use the URL shape as the card detector — no semantic CSS classes are
+// exposed on the live page.
+const LISTING_URL_RE = /^\/detail\/([\w-]+)\/([\w-]+)\/?$/;
 
 export function parseListingsPage(html: string): NormalizedListing[] {
   const $ = cheerio.load(html);
@@ -30,9 +30,8 @@ export function parseListingsPage(html: string): NormalizedListing[] {
     if (!href) return;
     const match = LISTING_URL_RE.exec(href);
     if (!match) return;
-    const variant = match[1]!; // detail-aaa | detail-nove-auto
-    const alphaId = match[3]!;
-    const sourceId = `${variant}:${alphaId}`;
+    const alphaId = match[2]!;
+    const sourceId = alphaId;
     if (seen.has(sourceId)) return;
     seen.add(sourceId);
 
@@ -77,9 +76,7 @@ export const autobazarEu: ScraperSource = {
   id: 'autobazar.eu',
   baseUrl: BASE,
   pageUrl({ page }) {
-    // autobazar.eu category listing — placeholder path; tune via WebFetch
-    // after first live run if it 404s.
-    return `${BASE}/osobne-auta?strana=${page}`;
+    return `${BASE}/vysledky/osobne-vozidla/?strana=${page}`;
   },
   parseListingsPage,
 };

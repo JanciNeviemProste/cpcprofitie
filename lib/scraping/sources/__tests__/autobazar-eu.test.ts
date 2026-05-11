@@ -9,15 +9,15 @@ const FIXTURE = readFileSync(
 );
 
 describe('autobazar.eu parseListingsPage', () => {
-  it('extracts both /detail-aaa and /detail-nove-auto listings', () => {
+  it('extracts /detail/ listings', () => {
     const listings = parseListingsPage(FIXTURE);
     expect(listings).toHaveLength(2);
   });
 
-  it('encodes variant + alphaId into sourceId', () => {
+  it('uses alphaId as sourceId', () => {
     const listings = parseListingsPage(FIXTURE);
     const ids = listings.map((l) => l.sourceId);
-    expect(ids).toEqual(['detail-aaa:AmQC9-EmTRY', 'detail-nove-auto:AmmFvg1sl3x']);
+    expect(ids).toEqual(['AmQC9-EmTRY', 'AmmFvg1sl3x']);
   });
 
   it('parses price, year, fuel, transmission from card text', () => {
@@ -39,7 +39,7 @@ describe('autobazar.eu parseListingsPage', () => {
 
   it('absolutizes detail URLs', () => {
     const [i30] = parseListingsPage(FIXTURE);
-    expect(i30?.url).toBe('https://www.autobazar.eu/detail-aaa/hyundai-i30-16-cvvt/AmQC9-EmTRY/');
+    expect(i30?.url).toBe('https://www.autobazar.eu/detail/hyundai-i30-16-cvvt/AmQC9-EmTRY/');
   });
 
   it('drops raw HTML from rawPayload', () => {

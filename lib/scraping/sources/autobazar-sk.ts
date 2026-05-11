@@ -17,10 +17,10 @@ import type { ScraperSource } from './source-interface';
 const BASE = 'https://www.autobazar.sk';
 
 // autobazar.sk cards are anchors whose href matches /<numericId>/<slug>/.
-// The card has no semantic CSS class — we discover it by URL shape, then
-// climb to the visual block (usually 1-2 parent elements) to read text
-// content (price + year/km/fuel comma-separated).
-const LISTING_URL_RE = /^\/(\d{6,})\/[\w-]+\/?$/;
+// Listings can appear as relative (/27891055/audi-sq7/) or absolute
+// (https://www.autobazar.sk/27891055/audi-sq7/) — accept both.
+const LISTING_URL_RE =
+  /^(?:https?:\/\/(?:www\.)?autobazar\.sk)?\/(\d{6,})\/[\w-]+\/?$/;
 
 export function parseListingsPage(html: string): NormalizedListing[] {
   const $ = cheerio.load(html);
@@ -36,7 +36,9 @@ export function parseListingsPage(html: string): NormalizedListing[] {
     if (seen.has(sourceId)) return;
     seen.add(sourceId);
 
-    const url = `${BASE}${href.endsWith('/') ? href : `${href}/`}`;
+    // href may be absolute or relative — normalise to canonical absolute URL.
+    const path = href.replace(/^https?:\/\/(?:www\.)?autobazar\.sk/, '');
+    const url = `${BASE}${path.endsWith('/') ? path : `${path}/`}`;
     // Climb to a reasonable card-sized parent so we capture surrounding
     // text (price, meta line). 2 levels works for current layout.
     const $anchor = $(el);
@@ -82,7 +84,7 @@ export const autobazarSk: ScraperSource = {
   id: 'autobazar.sk',
   baseUrl: BASE,
   pageUrl({ page }) {
-    return `${BASE}/osobne-auta/?page=${page}`;
+    return `${BASE}/inzeraty/?page=${page}`;
   },
   parseListingsPage,
   detailUrl,
