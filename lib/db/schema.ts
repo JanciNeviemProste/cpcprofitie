@@ -102,6 +102,8 @@ export const vehicleModels = pgTable(
   ],
 );
 
+export const sellerTypeEnum = pgEnum('seller_type', ['private', 'dealer']);
+
 export const listings = pgTable(
   'listings',
   {
@@ -125,6 +127,50 @@ export const listings = pgTable(
     uniqueIndex('listings_source_source_id_idx').on(t.source, t.sourceId),
     index('listings_model_id_first_seen_idx').on(t.modelId, t.firstSeenAt),
     index('listings_region_idx').on(t.region),
+  ],
+);
+
+// Per-listing detail row populated by a second-pass enrichment scrape of the
+// listing's detail URL. 1:1 with `listings.id` — separate table so the cheap
+// listing-page snapshot can land first without blocking on detail fetches.
+export const listingDetails = pgTable(
+  'listing_details',
+  {
+    listingId: bigserial('listing_id', { mode: 'bigint' })
+      .primaryKey()
+      .references(() => listings.id, { onDelete: 'cascade' }),
+    bodyType: varchar('body_type', { length: 32 }),
+    colorExterior: varchar('color_exterior', { length: 64 }),
+    colorInterior: varchar('color_interior', { length: 64 }),
+    powerKw: integer('power_kw'),
+    engineCcm: integer('engine_ccm'),
+    vin: varchar('vin', { length: 17 }),
+    sellerType: sellerTypeEnum('seller_type'),
+    sellerName: text('seller_name'),
+    description: text('description'),
+    equipment: jsonb('equipment').notNull().default(sql`'[]'::jsonb`),
+    detailedAt: timestamp('detailed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+
+// Photos for a listing. 1:N with `listings.id`. Position is 1-based; the
+// hero image is `position = 1`. URLs point at the source CDN; we don't
+// rehost.
+export const listingPhotos = pgTable(
+  'listing_photos',
+  {
+    id: bigserial('id', { mode: 'bigint' }).primaryKey(),
+    listingId: bigserial('listing_id', { mode: 'bigint' })
+      .notNull()
+      .references(() => listings.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    url: text('url').notNull(),
+    width: integer('width'),
+    height: integer('height'),
+  },
+  (t) => [
+    uniqueIndex('listing_photos_listing_position_idx').on(t.listingId, t.position),
+    index('listing_photos_listing_idx').on(t.listingId),
   ],
 );
 

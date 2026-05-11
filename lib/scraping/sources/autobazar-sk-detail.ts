@@ -1,0 +1,116 @@
+// Detail-page parser for autobazar.sk. Listings detail URLs are
+// `/{numericId}/{slug}/` — same as the listing-page anchor, so we re-use the
+// listing URL directly.
+
+import * as cheerio from 'cheerio';
+import type { NormalizedDetail, NormalizedListing, SellerType } from '../types';
+
+const NUM_RE = /(\d[\d\s]*)/;
+
+export function detailUrl(listing: NormalizedListing): string {
+  return listing.url;
+}
+
+export function parseDetailPage(html: string, listing: NormalizedListing): NormalizedDetail {
+  const $ = cheerio.load(html);
+
+  // Photos: <a href="...img.autobazar.sk/foto/..."> wrap thumbnail anchors.
+  // We dedupe by URL and keep insertion order.
+  const photos: string[] = [];
+  const seen = new Set<string>();
+  $('a[href*="img.autobazar.sk"], img[src*="img.autobazar.sk"]').each((_, el) => {
+    const $el = $(el);
+    const url = ($el.attr('href') ?? $el.attr('src') ?? '').trim();
+    if (!url) return;
+    // Skip thumbnail-only variants when a higher-res sibling exists. Bigger
+    // file paths usually carry `/foto/` segment; thumbnails carry `/thumb/`.
+    if (url.includes('/thumb/')) return;
+    if (seen.has(url)) return;
+    seen.add(url);
+    photos.push(url);
+  });
+
+  const fullText = $('body').text();
+
+  // Specs are laid out as "Label: value" pairs in <strong>/<dt>/<td> elements.
+  // Use a robust label→value extractor.
+  const bodyType = extractAfterLabel(fullText, 'Karoséria');
+  const colorExterior = extractAfterLabel(fullText, 'Farba');
+  const colorInterior = extractAfterLabel(fullText, 'Interiér');
+  const powerKw = parseIntFromText(extractAfterLabel(fullText, 'Výkon'));
+  const engineCcm = parseIntFromText(extractAfterLabel(fullText, 'Objem'));
+  const vinRaw = extractAfterLabel(fullText, 'VIN');
+  const vin = isPlausibleVin(vinRaw) ? vinRaw : null;
+
+  // Seller block: dealer pages link to `<slug>.autobazar.sk`. Private sellers
+  // show "Súkromný predajca" or similar text.
+  const $dealerLink = $('a[href*=".autobazar.sk"]').filter((_, a) => {
+    const href = $(a).attr('href') ?? '';
+    return /\/\/[\w-]+\.autobazar\.sk/.test(href);
+  });
+  const sellerName = $dealerLink.first().text().trim() || null;
+  const sellerType: SellerType | null = $dealerLink.length > 0
+    ? 'dealer'
+    : /S[uú]kromn[yý]/i.test(fullText)
+      ? 'private'
+      : null;
+
+  // Equipment: gather <ul><li> items inside sections labeled Bezpečnosť /
+  // Komfort / Ďalšia výbava. To keep the parser robust we just collect all
+  // <li> entries whose text matches the typical "Klimatizácia" / "Airbag"
+  // shape (3-50 chars, no digits at start).
+  const equipment: string[] = [];
+  $('li').each((_, el) => {
+    const text = $(el).text().trim();
+    if (text.length < 3 || text.length > 80) return;
+    if (/^\d/.test(text)) return;
+    if (equipment.includes(text)) return;
+    equipment.push(text);
+  });
+
+  // Description: the "Poznámka" or seller-notes block. Heuristic: first
+  // long paragraph (>200 chars) on the page that isn't a list item.
+  let description: string | null = null;
+  $('p').each((_, el) => {
+    const text = $(el).text().trim();
+    if (text.length >= 200 && description === null) {
+      description = text.slice(0, 4000);
+    }
+  });
+
+  return {
+    source: listing.source,
+    sourceId: listing.sourceId,
+    photos,
+    description,
+    vin,
+    bodyType,
+    colorExterior,
+    colorInterior,
+    powerKw,
+    engineCcm,
+    sellerType,
+    sellerName,
+    equipment: equipment.slice(0, 200),
+  };
+}
+
+function extractAfterLabel(text: string, label: string): string | null {
+  const re = new RegExp(`${label}\\s*[:\\-]?\\s*([^\\n,;]+?)(?:\\s{2,}|\\n|,|;|$)`, 'i');
+  const m = re.exec(text);
+  return m?.[1]?.trim() ?? null;
+}
+
+function parseIntFromText(text: string | null): number | null {
+  if (!text) return null;
+  const m = NUM_RE.exec(text);
+  if (!m) return null;
+  const n = Number(m[1]!.replace(/\s/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function isPlausibleVin(s: string | null): boolean {
+  if (!s) return false;
+  // Modern VIN: 17 chars, A-Z + 0-9 minus I/O/Q.
+  return /^[A-HJ-NPR-Z0-9]{17}$/.test(s.trim().toUpperCase());
+}

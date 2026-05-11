@@ -3,7 +3,9 @@ import * as Sentry from '@sentry/nextjs';
 import {
   ALL_SOURCES,
   getSource,
+  persistDetails,
   recordScrapeRun,
+  runEnrichment,
   runScrape,
   upsertListings,
 } from '@/lib/scraping';
@@ -17,9 +19,8 @@ export const maxDuration = 300;
 
 const PROD = process.env.VERCEL_ENV === 'production';
 
-// Pages per source per cron run. Keep low so we fit under maxDuration=300s
-// with ~1.5s crawl-delay × 4 sources × N pages.
 const PAGES_PER_RUN = 5;
+const ENRICH_LIMIT_PER_RUN = 20;
 
 export async function GET(request: Request) {
   const expected = process.env.CRON_SECRET;
@@ -39,20 +40,43 @@ export async function GET(request: Request) {
     status: 'succeeded' | 'failed';
     listingsFound: number;
     counts?: { added: number; updated: number; skipped: number };
+    enrichment?: { fetched: number; detailsUpserted: number; photosInserted: number };
     errors: string[];
   };
   const summary: PerSource[] = [];
 
   for (const id of ALL_SOURCES) {
     try {
-      const result = await runScrape(getSource(id), { pages: PAGES_PER_RUN });
+      const source = getSource(id);
+      const result = await runScrape(source, { pages: PAGES_PER_RUN });
       const counts = await upsertListings(result.listings);
       await recordScrapeRun(id, result, counts);
+
+      let enrichment: PerSource['enrichment'];
+      if (source.parseDetailPage) {
+        const enrichResult = await runEnrichment(source, result.listings, {
+          limit: ENRICH_LIMIT_PER_RUN,
+        });
+        const detailCounts = await persistDetails(enrichResult.details);
+        enrichment = {
+          fetched: enrichResult.fetched,
+          detailsUpserted: detailCounts.detailsUpserted,
+          photosInserted: detailCounts.photosInserted,
+        };
+        if (enrichResult.errors.length > 0) {
+          console.warn('enrichment_partial', {
+            source: id,
+            errorsSample: enrichResult.errors.slice(0, 3),
+          });
+        }
+      }
+
       summary.push({
         source: id,
         status: result.errors.length === 0 ? 'succeeded' : 'failed',
         listingsFound: result.listings.length,
         counts,
+        enrichment,
         errors: result.errors,
       });
     } catch (e) {

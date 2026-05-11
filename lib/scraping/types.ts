@@ -48,3 +48,26 @@ export type ScrapeResult = {
   pagesVisited: number;
   errors: string[];
 };
+
+export type SellerType = 'private' | 'dealer';
+
+/** Output of a per-listing detail-page enrichment fetch. Most fields are
+ *  optional because not every source publishes them and old listings get
+ *  truncated. */
+export type NormalizedDetail = {
+  source: Source;
+  sourceId: string;
+  /** Full-resolution photo URLs in display order. May be empty. */
+  photos: string[];
+  description: string | null;
+  vin: string | null;
+  bodyType: string | null;
+  colorExterior: string | null;
+  colorInterior: string | null;
+  powerKw: number | null;
+  engineCcm: number | null;
+  sellerType: SellerType | null;
+  sellerName: string | null;
+  /** Flat list of equipment labels (klimatizácia, ABS, ESP, ...). */
+  equipment: string[];
+};

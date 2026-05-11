@@ -13,6 +13,7 @@ import {
   prefixRegion,
 } from '../normalize';
 import type { NormalizedListing } from '../types';
+import { detailUrl, parseDetailPage } from './sauto-cz-detail';
 import type { ScraperSource } from './source-interface';
 
 const BASE = 'https://www.sauto.cz';
@@ -79,6 +80,8 @@ export const sautoCz: ScraperSource = {
     return `${BASE}/inzerce/osobni?strana=${page}`;
   },
   parseListingsPage,
+  detailUrl,
+  parseDetailPage,
 };
 
 // Czech locations on sauto.cz look like "Praha", "Praha-západ", "Brno",

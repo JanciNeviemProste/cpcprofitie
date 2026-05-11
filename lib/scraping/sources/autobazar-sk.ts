@@ -11,6 +11,7 @@ import {
   prefixRegion,
 } from '../normalize';
 import type { NormalizedListing } from '../types';
+import { detailUrl, parseDetailPage } from './autobazar-sk-detail';
 import type { ScraperSource } from './source-interface';
 
 const BASE = 'https://www.autobazar.sk';
@@ -84,6 +85,8 @@ export const autobazarSk: ScraperSource = {
     return `${BASE}/osobne-auta/?page=${page}`;
   },
   parseListingsPage,
+  detailUrl,
+  parseDetailPage,
 };
 
 // Best-effort region hint — Slovak `kraj` names typically appear in the card

@@ -3,10 +3,17 @@
 // graceful no-ops when DATABASE_URL is unset so dev / preview builds don't
 // crash.
 
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
-import { listings, scrapeRuns, vehicleMakes, vehicleModels } from '@/lib/db/schema';
-import type { NormalizedListing, ScrapeResult, Source } from './types';
+import {
+  listingDetails,
+  listingPhotos,
+  listings,
+  scrapeRuns,
+  vehicleMakes,
+  vehicleModels,
+} from '@/lib/db/schema';
+import type { NormalizedDetail, NormalizedListing, ScrapeResult, Source } from './types';
 
 export type UpsertCounts = { added: number; updated: number; skipped: number };
 
@@ -206,6 +213,126 @@ export async function recordScrapeRun(
   } catch (e) {
     console.error('scrape_run_record_failed', e instanceof Error ? e.message : e);
   }
+}
+
+// ─── Detail enrichment persistence ──────────────────────────────────────────
+
+export type DetailUpsertCounts = {
+  detailsUpserted: number;
+  photosInserted: number;
+  skipped: number;
+};
+
+/** Resolve a (source, sourceId) pair to the listings.id. Cached per-process. */
+const listingIdCache = new Map<string, bigint>();
+
+function listingKey(source: Source, sourceId: string): string {
+  return `${source}::${sourceId}`;
+}
+
+async function resolveListingId(
+  source: Source,
+  sourceId: string,
+): Promise<bigint | null> {
+  const key = listingKey(source, sourceId);
+  const cached = listingIdCache.get(key);
+  if (cached !== undefined) return cached;
+  try {
+    const db = getDb();
+    const rows = await db
+      .select({ id: listings.id })
+      .from(listings)
+      .where(and(eq(listings.source, source), eq(listings.sourceId, sourceId)))
+      .limit(1);
+    const id = rows[0]?.id ?? null;
+    if (id !== null) listingIdCache.set(key, id);
+    return id;
+  } catch (e) {
+    console.error('resolveListingId_failed', {
+      source,
+      sourceId,
+      error: e instanceof Error ? e.message : e,
+    });
+    return null;
+  }
+}
+
+export async function persistDetails(
+  details: NormalizedDetail[],
+): Promise<DetailUpsertCounts> {
+  if (details.length === 0) return { detailsUpserted: 0, photosInserted: 0, skipped: 0 };
+  if (!hasDb()) {
+    return { detailsUpserted: 0, photosInserted: 0, skipped: details.length };
+  }
+  const db = getDb();
+  let detailsUpserted = 0;
+  let photosInserted = 0;
+  let skipped = 0;
+
+  for (const d of details) {
+    const listingId = await resolveListingId(d.source, d.sourceId);
+    if (listingId === null) {
+      skipped++;
+      continue;
+    }
+    try {
+      await db
+        .insert(listingDetails)
+        .values({
+          listingId,
+          bodyType: d.bodyType,
+          colorExterior: d.colorExterior,
+          colorInterior: d.colorInterior,
+          powerKw: d.powerKw,
+          engineCcm: d.engineCcm,
+          vin: d.vin,
+          sellerType: d.sellerType,
+          sellerName: d.sellerName,
+          description: d.description,
+          equipment: d.equipment,
+        })
+        .onConflictDoUpdate({
+          target: listingDetails.listingId,
+          set: {
+            bodyType: sql`excluded.body_type`,
+            colorExterior: sql`excluded.color_exterior`,
+            colorInterior: sql`excluded.color_interior`,
+            powerKw: sql`excluded.power_kw`,
+            engineCcm: sql`excluded.engine_ccm`,
+            vin: sql`excluded.vin`,
+            sellerType: sql`excluded.seller_type`,
+            sellerName: sql`excluded.seller_name`,
+            description: sql`excluded.description`,
+            equipment: sql`excluded.equipment`,
+            detailedAt: sql`now()`,
+          },
+        });
+      detailsUpserted++;
+
+      if (d.photos.length > 0) {
+        // Replace photos atomically: delete then insert. Cheaper than per-row
+        // upsert because position numbering changes when the seller re-orders.
+        await db.delete(listingPhotos).where(eq(listingPhotos.listingId, listingId));
+        const photoRows = d.photos.slice(0, 100).map((url, i) => ({
+          listingId,
+          position: i + 1,
+          url: url.slice(0, 2000),
+        }));
+        if (photoRows.length > 0) {
+          await db.insert(listingPhotos).values(photoRows);
+          photosInserted += photoRows.length;
+        }
+      }
+    } catch (e) {
+      console.error('persistDetails_row_failed', {
+        source: d.source,
+        sourceId: d.sourceId,
+        error: e instanceof Error ? e.message : e,
+      });
+      skipped++;
+    }
+  }
+  return { detailsUpserted, photosInserted, skipped };
 }
 
 function hash32(s: string): number {

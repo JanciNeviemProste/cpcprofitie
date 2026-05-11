@@ -15,8 +15,16 @@ export {
   parseYear,
   slugify,
 } from './normalize';
-export { upsertListings, recordScrapeRun } from './persist';
+export { upsertListings, recordScrapeRun, persistDetails } from './persist';
+export { runEnrichment, __resetEnrichRobotsCache } from './enrich';
 export type { ScraperSource, RunScrapeOptions } from './scrape';
-export type { NormalizedListing, ScrapeResult, Source } from './types';
+export type { EnrichOptions, EnrichResult } from './enrich';
+export type {
+  NormalizedDetail,
+  NormalizedListing,
+  ScrapeResult,
+  SellerType,
+  Source,
+} from './types';
 export { ALL_SOURCES } from './types';
 export type { SnapshotInput, SnapshotStats } from './aggregate';
