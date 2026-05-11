@@ -1,32 +1,34 @@
 <!doctype html>
-<!-- Synthetic Bazoš fixture. The real listing pages are flatter, with
-  description text carrying year/km/fuel hints. -->
+<!-- Bazoš real DOM is table-based, anchors point at /inzerat/<id>/<slug>.php.
+  Description text carries year/km/fuel/transmission hints; price is in
+  a <strong>; location is a "City NNN NN" pattern. -->
 <html lang="sk">
   <body>
     <table>
-      <tr class="inzeraty" data-listing-id="111222">
+      <tr>
         <td>
-          <div class="inzeratynadpis">
-            <h2><a href="/inzerat/111222/skoda-octavia.php">Škoda Octavia 1.9 TDI</a></h2>
+          <a href="/inzerat/191630983/volkswagen-tiguan-20tdi-dsg.php">
+            Volkswagen Tiguan 2.0 TDI DSG, odpočet DPH
+          </a>
+          <div>
+            Tiguan 2.0 TDI DSG, rok 2022, najazdené 95 000 km, nafta, automatická.
+            Plná servisná história.
           </div>
-          <div class="popis">
+          <strong>19 990 €</strong>
+          <span>Žiar nad Hronom 965 01</span>
+          <span>5 x</span>
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <a href="/inzerat/191701234/skoda-octavia-1-9-tdi.php">Škoda Octavia 1.9 TDI</a>
+          <div>
             Predám Škoda Octavia rok 2017, najazdené 165 000 km, nafta, manuálna,
             servisná knižka, ťažné. Stav výborný.
           </div>
-          <div class="inzeratycena">7 900 €</div>
-          <div class="inzeratylok">Trnavský</div>
-        </td>
-      </tr>
-      <tr class="inzeraty" data-listing-id="333444">
-        <td>
-          <div class="inzeratynadpis">
-            <h2><a href="/inzerat/333444/bmw-3-series.php">BMW 320d Sedan</a></h2>
-          </div>
-          <div class="popis">
-            BMW 320d r. 2020, 110 000 km, diesel, automat. Plná výbava.
-          </div>
-          <div class="inzeratycena">21 500 €</div>
-          <div class="inzeratylok">Bratislava</div>
+          <strong>7 900 €</strong>
+          <span>Trnava 917 01</span>
+          <span>12 x</span>
         </td>
       </tr>
     </table>

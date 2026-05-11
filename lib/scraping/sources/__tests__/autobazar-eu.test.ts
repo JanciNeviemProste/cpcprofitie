@@ -9,46 +9,46 @@ const FIXTURE = readFileSync(
 );
 
 describe('autobazar.eu parseListingsPage', () => {
-  it('extracts both cards from the fixture', () => {
+  it('extracts both /detail-aaa and /detail-nove-auto listings', () => {
     const listings = parseListingsPage(FIXTURE);
     expect(listings).toHaveLength(2);
   });
 
-  it('builds absolute URL from relative href', () => {
-    const [first] = parseListingsPage(FIXTURE);
-    expect(first?.url).toBe('https://www.autobazar.eu/inzerat/skoda-octavia-123/');
-  });
-
-  it('keeps already-absolute URLs', () => {
+  it('encodes variant + alphaId into sourceId', () => {
     const listings = parseListingsPage(FIXTURE);
-    expect(listings[1]?.url).toBe('https://www.autobazar.eu/inzerat/vw-passat-456/');
+    const ids = listings.map((l) => l.sourceId);
+    expect(ids).toEqual(['detail-aaa:AmQC9-EmTRY', 'detail-nove-auto:AmmFvg1sl3x']);
   });
 
-  it('parses price, year, mileage, fuel, transmission, region', () => {
-    const [octavia] = parseListingsPage(FIXTURE);
-    expect(octavia?.priceEur).toBe(12990);
-    expect(octavia?.year).toBe(2018);
-    expect(octavia?.mileageKm).toBe(145000);
-    expect(octavia?.fuel).toBe('diesel');
-    expect(octavia?.transmission).toBe('manual');
-    expect(octavia?.region).toBe('Nitriansky');
+  it('parses price, year, fuel, transmission from card text', () => {
+    const [i30, puma] = parseListingsPage(FIXTURE);
+    expect(i30?.priceEur).toBe(11990);
+    expect(i30?.year).toBe(2018);
+    expect(i30?.fuel).toBe('gasoline');
+    expect(i30?.transmission).toBe('manual');
+    expect(puma?.priceEur).toBe(26190);
+    expect(puma?.year).toBe(2025);
+    expect(puma?.transmission).toBe('automatic');
   });
 
-  it('tags every listing with source=autobazar.eu', () => {
-    for (const l of parseListingsPage(FIXTURE)) {
-      expect(l.source).toBe('autobazar.eu');
-    }
+  it('tags SK regions with the SK- prefix', () => {
+    const [i30, puma] = parseListingsPage(FIXTURE);
+    expect(i30?.region).toBe('SK-Bratislavský');
+    expect(puma?.region).toBe('SK-Žilinský');
   });
 
-  it('returns [] on an empty page', () => {
-    expect(parseListingsPage('<html><body></body></html>')).toEqual([]);
+  it('absolutizes detail URLs', () => {
+    const [i30] = parseListingsPage(FIXTURE);
+    expect(i30?.url).toBe('https://www.autobazar.eu/detail-aaa/hyundai-i30-16-cvvt/AmQC9-EmTRY/');
   });
-});
 
-describe('autobazar.eu source descriptor', () => {
-  it('pageUrl produces a valid URL with the expected query', () => {
-    const url = autobazarEu.pageUrl({ page: 3 });
-    expect(url).toContain('strana=3');
-    expect(() => new URL(url)).not.toThrow();
+  it('drops raw HTML from rawPayload', () => {
+    const [i30] = parseListingsPage(FIXTURE);
+    expect(i30?.rawPayload).toHaveProperty('capturedAt');
+    expect(i30?.rawPayload).not.toHaveProperty('html');
+  });
+
+  it('source descriptor pageUrl is valid', () => {
+    expect(() => new URL(autobazarEu.pageUrl({ page: 3 }))).not.toThrow();
   });
 });

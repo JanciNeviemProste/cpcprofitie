@@ -1,53 +1,61 @@
 import * as cheerio from 'cheerio';
 import {
-  parseEur,
+  extractEurFromText,
+  extractFuelHintFromText,
+  extractKmFromText,
+  extractTransmissionHintFromText,
+  extractYearFromText,
   parseFuel,
-  parseKm,
   parseMakeModel,
   parseTransmission,
-  parseYear,
+  prefixRegion,
 } from '../normalize';
 import type { NormalizedListing } from '../types';
 import type { ScraperSource } from './source-interface';
 
 const BASE = 'https://www.autobazar.sk';
 
-// DOM selectors are placeholders. Tune them against the live page after the
-// first production scrape via WebFetch — structure swaps reasonably often, so
-// keep them in one place.
-const SEL = {
-  card: '[data-testid="listing-card"], article.listing, .listing-item',
-  title: '[data-testid="listing-title"], h2 a, .listing-title',
-  link: 'a[href*="/auto/"]',
-  price: '[data-testid="listing-price"], .price, .listing-price',
-  year: '[data-testid="listing-year"], .listing-year',
-  mileage: '[data-testid="listing-mileage"], .listing-km, .listing-mileage',
-  fuel: '[data-testid="listing-fuel"], .listing-fuel',
-  transmission: '[data-testid="listing-transmission"], .listing-transmission',
-  region: '[data-testid="listing-region"], .listing-region, .listing-location',
-} as const;
+// autobazar.sk cards are anchors whose href matches /<numericId>/<slug>/.
+// The card has no semantic CSS class — we discover it by URL shape, then
+// climb to the visual block (usually 1-2 parent elements) to read text
+// content (price + year/km/fuel comma-separated).
+const LISTING_URL_RE = /^\/(\d{6,})\/[\w-]+\/?$/;
 
 export function parseListingsPage(html: string): NormalizedListing[] {
   const $ = cheerio.load(html);
   const results: NormalizedListing[] = [];
+  const seen = new Set<string>();
 
-  $(SEL.card).each((_, el) => {
-    const $el = $(el);
-    const $link = $el.find(SEL.link).first();
-    const href = $link.attr('href');
+  $('a[href]').each((_, el) => {
+    const href = $(el).attr('href');
     if (!href) return;
-    const url = href.startsWith('http') ? href : `${BASE}${href}`;
-    const sourceId = extractListingId(url);
-    if (!sourceId) return;
+    const match = LISTING_URL_RE.exec(href);
+    if (!match) return;
+    const sourceId = match[1]!;
+    if (seen.has(sourceId)) return;
+    seen.add(sourceId);
 
-    const title = textOrNull($el.find(SEL.title).first());
+    const url = `${BASE}${href.endsWith('/') ? href : `${href}/`}`;
+    // Climb to a reasonable card-sized parent so we capture surrounding
+    // text (price, meta line). 2 levels works for current layout.
+    const $anchor = $(el);
+    // Scope cardText to the nearest article/li/tr/section wrapper so we don't
+    // bleed price/year text from neighbouring cards. Fallback to the direct
+    // parent when no semantic wrapper exists.
+    const $card =
+      $anchor.closest('article, li, tr, section').length > 0
+        ? $anchor.closest('article, li, tr, section')
+        : $anchor.parent();
+    const title = ($anchor.attr('title') ?? $anchor.text() ?? '').trim() || null;
+    const cardText = $card.text();
+
     const { makeSlug, modelSlug } = parseMakeModel(title);
-    const priceEur = parseEur(textOrNull($el.find(SEL.price).first()));
-    const year = parseYear(textOrNull($el.find(SEL.year).first()));
-    const mileageKm = parseKm(textOrNull($el.find(SEL.mileage).first()));
-    const fuel = parseFuel(textOrNull($el.find(SEL.fuel).first()));
-    const transmission = parseTransmission(textOrNull($el.find(SEL.transmission).first()));
-    const region = textOrNull($el.find(SEL.region).first());
+    const priceEur = extractEurFromText(cardText);
+    const year = extractYearFromText(cardText);
+    const mileageKm = extractKmFromText(cardText);
+    const fuel = parseFuel(extractFuelHintFromText(cardText));
+    const transmission = parseTransmission(extractTransmissionHintFromText(cardText));
+    const region = prefixRegion(extractRegionHint(cardText), 'SK');
 
     results.push({
       source: 'autobazar.sk',
@@ -62,7 +70,7 @@ export function parseListingsPage(html: string): NormalizedListing[] {
       transmission,
       region,
       rawTitle: title,
-      rawPayload: { html: $el.html() ?? '' },
+      rawPayload: { capturedAt: new Date().toISOString() },
     });
   });
 
@@ -73,18 +81,27 @@ export const autobazarSk: ScraperSource = {
   id: 'autobazar.sk',
   baseUrl: BASE,
   pageUrl({ page }) {
-    return `${BASE}/?form%5BvehicleType%5D=osobne&page=${page}`;
+    return `${BASE}/osobne-auta/?page=${page}`;
   },
   parseListingsPage,
 };
 
-function textOrNull($el: { text(): string; length: number }): string | null {
-  if ($el.length === 0) return null;
-  const text = $el.text().trim();
-  return text.length > 0 ? text : null;
-}
+// Best-effort region hint — Slovak `kraj` names typically appear in the card
+// footer. We do not crash if absent.
+const SK_REGIONS = [
+  'Bratislavský',
+  'Trnavský',
+  'Trenčiansky',
+  'Nitriansky',
+  'Žilinský',
+  'Banskobystrický',
+  'Prešovský',
+  'Košický',
+];
 
-function extractListingId(url: string): string | null {
-  const m = /\/auto\/([^/?#]+)/.exec(url);
-  return m?.[1] ?? null;
+function extractRegionHint(text: string): string | null {
+  for (const r of SK_REGIONS) {
+    if (text.includes(r)) return r;
+  }
+  return null;
 }

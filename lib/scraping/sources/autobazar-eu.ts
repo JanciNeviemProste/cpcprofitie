@@ -1,52 +1,57 @@
 import * as cheerio from 'cheerio';
 import {
-  parseEur,
+  extractEurFromText,
+  extractFuelHintFromText,
+  extractKmFromText,
+  extractTransmissionHintFromText,
+  extractYearFromText,
   parseFuel,
-  parseKm,
   parseMakeModel,
   parseTransmission,
-  parseYear,
+  prefixRegion,
 } from '../normalize';
 import type { NormalizedListing } from '../types';
 import type { ScraperSource } from './source-interface';
 
 const BASE = 'https://www.autobazar.eu';
 
-// Placeholder selectors — tune via WebFetch against the live DOM after the
-// first production scrape. Keep all selectors in one block.
-const SEL = {
-  card: '[data-testid="listing-card"], .classified-item, article.advert',
-  title: '[data-testid="listing-title"], h2.advert-title, .classified-title',
-  link: 'a[href*="/inzerat/"], a[href*="/advert/"]',
-  price: '[data-testid="listing-price"], .advert-price, .classified-price',
-  year: '[data-testid="listing-year"], .advert-year, .classified-year',
-  mileage: '[data-testid="listing-mileage"], .advert-km, .classified-mileage',
-  fuel: '[data-testid="listing-fuel"], .advert-fuel',
-  transmission: '[data-testid="listing-transmission"], .advert-transmission',
-  region: '[data-testid="listing-region"], .advert-location, .classified-location',
-} as const;
+// autobazar.eu listing detail URLs: /detail-aaa/<slug>/<alphaId>/ or
+// /detail-nove-auto/<slug>/<alphaId>/. We use the URL shape as the card
+// detector — no semantic CSS classes are exposed on the live page.
+const LISTING_URL_RE = /^\/(detail-aaa|detail-nove-auto)\/([\w-]+)\/([\w-]+)\/?$/;
 
 export function parseListingsPage(html: string): NormalizedListing[] {
   const $ = cheerio.load(html);
   const results: NormalizedListing[] = [];
+  const seen = new Set<string>();
 
-  $(SEL.card).each((_, el) => {
-    const $el = $(el);
-    const $link = $el.find(SEL.link).first();
-    const href = $link.attr('href');
+  $('a[href]').each((_, el) => {
+    const href = $(el).attr('href');
     if (!href) return;
-    const url = href.startsWith('http') ? href : `${BASE}${href}`;
-    const sourceId = extractListingId(url);
-    if (!sourceId) return;
+    const match = LISTING_URL_RE.exec(href);
+    if (!match) return;
+    const variant = match[1]!; // detail-aaa | detail-nove-auto
+    const alphaId = match[3]!;
+    const sourceId = `${variant}:${alphaId}`;
+    if (seen.has(sourceId)) return;
+    seen.add(sourceId);
 
-    const title = textOrNull($el.find(SEL.title).first());
+    const url = `${BASE}${href.endsWith('/') ? href : `${href}/`}`;
+    const $anchor = $(el);
+    const $card =
+      $anchor.closest('article, li, tr, section').length > 0
+        ? $anchor.closest('article, li, tr, section')
+        : $anchor.parent();
+    const title = ($anchor.attr('title') ?? $anchor.text() ?? '').trim() || null;
+    const cardText = $card.text();
+
     const { makeSlug, modelSlug } = parseMakeModel(title);
-    const priceEur = parseEur(textOrNull($el.find(SEL.price).first()));
-    const year = parseYear(textOrNull($el.find(SEL.year).first()));
-    const mileageKm = parseKm(textOrNull($el.find(SEL.mileage).first()));
-    const fuel = parseFuel(textOrNull($el.find(SEL.fuel).first()));
-    const transmission = parseTransmission(textOrNull($el.find(SEL.transmission).first()));
-    const region = textOrNull($el.find(SEL.region).first());
+    const priceEur = extractEurFromText(cardText);
+    const year = extractYearFromText(cardText);
+    const mileageKm = extractKmFromText(cardText);
+    const fuel = parseFuel(extractFuelHintFromText(cardText));
+    const transmission = parseTransmission(extractTransmissionHintFromText(cardText));
+    const region = prefixRegion(extractRegionHint(cardText), 'SK');
 
     results.push({
       source: 'autobazar.eu',
@@ -61,7 +66,7 @@ export function parseListingsPage(html: string): NormalizedListing[] {
       transmission,
       region,
       rawTitle: title,
-      rawPayload: { html: $el.html() ?? '' },
+      rawPayload: { capturedAt: new Date().toISOString() },
     });
   });
 
@@ -72,18 +77,27 @@ export const autobazarEu: ScraperSource = {
   id: 'autobazar.eu',
   baseUrl: BASE,
   pageUrl({ page }) {
-    return `${BASE}/?inzerat-druh=osobne&strana=${page}`;
+    // autobazar.eu category listing — placeholder path; tune via WebFetch
+    // after first live run if it 404s.
+    return `${BASE}/osobne-auta?strana=${page}`;
   },
   parseListingsPage,
 };
 
-function textOrNull($el: { text(): string; length: number }): string | null {
-  if ($el.length === 0) return null;
-  const text = $el.text().trim();
-  return text.length > 0 ? text : null;
-}
+const SK_REGIONS = [
+  'Bratislavský',
+  'Trnavský',
+  'Trenčiansky',
+  'Nitriansky',
+  'Žilinský',
+  'Banskobystrický',
+  'Prešovský',
+  'Košický',
+];
 
-function extractListingId(url: string): string | null {
-  const m = /\/(?:inzerat|advert)\/([^/?#]+)/.exec(url);
-  return m?.[1] ?? null;
+function extractRegionHint(text: string): string | null {
+  for (const r of SK_REGIONS) {
+    if (text.includes(r)) return r;
+  }
+  return null;
 }

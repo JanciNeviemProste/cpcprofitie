@@ -1,45 +1,30 @@
 <!doctype html>
-<!--
-  Synthetic fixture mirroring the placeholder selectors used in
-  lib/scraping/sources/autobazar-sk.ts. Re-capture from a single live page
-  once selectors are tuned against the real DOM (and only one page, to
-  respect robots.txt + crawl-delay).
--->
+<!-- Anchor-centric fixture matching the real autobazar.sk DOM, where listing
+  cards are <a href="/<numericId>/<slug>/"> with surrounding text content
+  carrying price + year/km/fuel/region. -->
 <html lang="sk">
   <body>
     <main>
-      <article class="listing-item" data-testid="listing-card">
-        <a class="listing-link" data-testid="listing-link" href="/auto/abc-123/">
-          <h2 class="listing-title" data-testid="listing-title">Škoda Octavia 2.0 TDI Combi</h2>
-        </a>
-        <span class="price" data-testid="listing-price">14 990 €</span>
-        <span class="listing-year" data-testid="listing-year">Rok výroby: 2019</span>
-        <span class="listing-km" data-testid="listing-mileage">120 000 km</span>
-        <span class="listing-fuel" data-testid="listing-fuel">Diesel</span>
-        <span class="listing-transmission" data-testid="listing-transmission">Manuálna</span>
-        <span class="listing-region" data-testid="listing-region">Bratislavský</span>
+      <article>
+        <a title="Škoda Octavia 1.6 TDI Combi" href="/28199857/skoda-octavia-1-6-tdi-combi/">Škoda Octavia 1.6 TDI Combi</a>
+        <div>2019, Diesel, Manuálna, 145 000 km</div>
+        <strong>12 990 €</strong>
+        <span>Bratislavský</span>
       </article>
-      <article class="listing-item" data-testid="listing-card">
-        <a class="listing-link" data-testid="listing-link" href="https://www.autobazar.sk/auto/def-456/">
-          <h2 class="listing-title" data-testid="listing-title">BMW 320d Sedan</h2>
-        </a>
-        <span class="price" data-testid="listing-price">22 500 €</span>
-        <span class="listing-year" data-testid="listing-year">2020</span>
-        <span class="listing-km" data-testid="listing-mileage">85 000 km</span>
-        <span class="listing-fuel" data-testid="listing-fuel">Diesel</span>
-        <span class="listing-transmission" data-testid="listing-transmission">Automat</span>
-        <span class="listing-region" data-testid="listing-region">Košický</span>
+      <article>
+        <a title="BMW 320d Sedan" href="/29001122/bmw-320d-sedan/">BMW 320d Sedan</a>
+        <div>2020, Diesel, Automatická, 85 000 km</div>
+        <strong>22 500 €</strong>
+        <span>Košický</span>
       </article>
-      <article class="listing-item" data-testid="listing-card">
-        <a class="listing-link" data-testid="listing-link" href="/auto/ghi-789/">
-          <h2 class="listing-title" data-testid="listing-title">Audi A4 Avant</h2>
-        </a>
-        <span class="price" data-testid="listing-price">Cena na dotaz</span>
-        <span class="listing-year" data-testid="listing-year">2018</span>
-        <span class="listing-km" data-testid="listing-mileage">— km</span>
-        <span class="listing-fuel" data-testid="listing-fuel">Benzín</span>
-        <span class="listing-region" data-testid="listing-region">Žilinský</span>
+      <article>
+        <a title="Toyota Camry Hybrid" href="/29002233/toyota-camry-hybrid/">Toyota Camry Hybrid</a>
+        <div>2022, Hybrid, Automatická, 38 000 km</div>
+        <strong>34 900 €</strong>
+        <span>Nitriansky</span>
       </article>
+      <a href="/o-portali/">O portáli</a>
+      <a href="/login">Prihlásiť</a>
     </main>
   </body>
 </html>

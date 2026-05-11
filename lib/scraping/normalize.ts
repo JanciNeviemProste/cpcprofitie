@@ -112,3 +112,98 @@ export function parseMakeModel(title: string | null | undefined): {
   const model = slugify(tokens[1]!);
   return { makeSlug: make, modelSlug: `${make}-${model}` };
 }
+
+// ─── Free-text extractors (used by source plugins) ────────────────────────────
+// Real listing pages on autobazar.sk / bazos / sauto.cz don't expose price or
+// year via dedicated CSS classes — they live in mixed text content next to the
+// anchor. These helpers pull the canonical value out of that text.
+
+const WHITESPACE_RE = /\s+/g;
+
+function squeezeDigits(s: string): string {
+  return s.replace(WHITESPACE_RE, '');
+}
+
+/** Extract EUR price from arbitrary text. */
+export function extractEurFromText(text: string | null | undefined): number | null {
+  if (!text) return null;
+  const m = /(\d[\d\s]{1,12})\s*€/.exec(text);
+  if (!m) return null;
+  const n = Number(squeezeDigits(m[1]!));
+  return Number.isFinite(n) && n >= 100 && n < 10_000_000 ? n : null;
+}
+
+/** Extract CZK price (sauto.cz format like "385 000 Kč"). */
+export function extractCzkFromText(text: string | null | undefined): number | null {
+  if (!text) return null;
+  const m = /(\d[\d\s]{1,12})\s*k[čc]/i.exec(text);
+  if (!m) return null;
+  const n = Number(squeezeDigits(m[1]!));
+  return Number.isFinite(n) && n >= 1000 && n < 100_000_000 ? n : null;
+}
+
+/** Extract a plausible vehicle year (1980–nextYear). */
+export function extractYearFromText(text: string | null | undefined): number | null {
+  if (!text) return null;
+  const re = /\b(19|20)\d{2}\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const n = Number(m[0]);
+    if (n >= 1980 && n <= new Date().getFullYear() + 1) return n;
+  }
+  return null;
+}
+
+/** Extract mileage in km from text like "120 000 km". */
+export function extractKmFromText(text: string | null | undefined): number | null {
+  if (!text) return null;
+  const m = /(\d[\d\s]{1,8})\s*km\b/i.exec(text);
+  if (!m) return null;
+  const n = Number(squeezeDigits(m[1]!));
+  return Number.isFinite(n) && n >= 0 && n < 2_000_000 ? n : null;
+}
+
+const FUEL_HINTS = [
+  'benzín',
+  'benzin',
+  'nafta',
+  'diesel',
+  'hybridní',
+  'hybrid',
+  'plug-in',
+  'phev',
+  'elektrické',
+  'elektrický',
+  'elektro',
+  'lpg',
+  'cng',
+];
+
+const TRANSMISSION_HINTS = ['manuálna', 'manuální', 'manual', 'automatická', 'automat'];
+
+export function extractFuelHintFromText(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const lower = text.toLowerCase();
+  for (const hint of FUEL_HINTS) {
+    if (lower.includes(hint)) return hint;
+  }
+  return null;
+}
+
+export function extractTransmissionHintFromText(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const lower = text.toLowerCase();
+  for (const hint of TRANSMISSION_HINTS) {
+    if (lower.includes(hint)) return hint;
+  }
+  return null;
+}
+
+/** Apply the SK-/CZ- prefix to a free-text region. No-op when already prefixed. */
+export function prefixRegion(region: string | null, country: 'SK' | 'CZ'): string | null {
+  if (!region) return null;
+  const trimmed = region.trim();
+  if (!trimmed) return null;
+  if (/^(SK|CZ)-/.test(trimmed)) return trimmed;
+  return `${country}-${trimmed}`;
+}

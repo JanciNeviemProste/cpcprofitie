@@ -1,34 +1,29 @@
 <!doctype html>
-<!--
-  Synthetic fixture mirroring the placeholder selectors used in
-  lib/scraping/sources/autobazar-eu.ts. Capture from a single live page once
-  selectors are tuned against the real DOM.
--->
+<!-- Anchor-centric fixture matching autobazar.eu DOM:
+  - /detail-aaa/<slug>/<alphaId>/ for used cars
+  - /detail-nove-auto/<slug>/<alphaId>/ for new cars
+  Card text holds price + year + fuel/transmission/region. -->
 <html lang="sk">
   <body>
     <main>
-      <article class="classified-item" data-testid="listing-card">
-        <a class="classified-link" data-testid="listing-link" href="/inzerat/skoda-octavia-123/">
-          <h2 class="classified-title" data-testid="listing-title">Škoda Octavia 1.6 TDI</h2>
+      <article>
+        <a title="Hyundai i30 1.6 CVVT" href="/detail-aaa/hyundai-i30-16-cvvt/AmQC9-EmTRY/">
+          Hyundai i30 1.6 CVVT
         </a>
-        <span class="classified-price" data-testid="listing-price">12 990 €</span>
-        <span class="classified-year" data-testid="listing-year">Rok: 2018</span>
-        <span class="classified-mileage" data-testid="listing-mileage">145 000 km</span>
-        <span class="advert-fuel" data-testid="listing-fuel">Diesel</span>
-        <span class="advert-transmission" data-testid="listing-transmission">Manuálna</span>
-        <span class="classified-location" data-testid="listing-region">Nitriansky</span>
+        <div>2018, Benzín, Manuálna, 98 000 km</div>
+        <strong>11 990 €</strong>
+        <span>Bratislavský</span>
       </article>
-      <article class="classified-item" data-testid="listing-card">
-        <a class="classified-link" data-testid="listing-link" href="https://www.autobazar.eu/inzerat/vw-passat-456/">
-          <h2 class="classified-title" data-testid="listing-title">Volkswagen Passat B8</h2>
+      <article>
+        <a title="Ford Puma 1.0 EcoBoost" href="/detail-nove-auto/ford-puma-10-ecoboost/AmmFvg1sl3x/">
+          Ford Puma 1.0 EcoBoost
         </a>
-        <span class="classified-price" data-testid="listing-price">18 500 €</span>
-        <span class="classified-year" data-testid="listing-year">2019</span>
-        <span class="classified-mileage" data-testid="listing-mileage">98 000 km</span>
-        <span class="advert-fuel" data-testid="listing-fuel">Diesel</span>
-        <span class="advert-transmission" data-testid="listing-transmission">Automatická</span>
-        <span class="classified-location" data-testid="listing-region">Bratislavský</span>
+        <div>2025, Benzín, Automat, 0 km</div>
+        <strong>26 190 €</strong>
+        <span>Žilinský</span>
       </article>
+      <a href="/o-nas">O nás</a>
+      <a href="/prihlasenie">Prihlásenie</a>
     </main>
   </body>
 </html>

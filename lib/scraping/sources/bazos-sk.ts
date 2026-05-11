@@ -1,53 +1,57 @@
 import * as cheerio from 'cheerio';
 import {
-  parseEur,
+  extractEurFromText,
+  extractFuelHintFromText,
+  extractKmFromText,
+  extractTransmissionHintFromText,
+  extractYearFromText,
   parseFuel,
-  parseKm,
   parseMakeModel,
   parseTransmission,
-  parseYear,
+  prefixRegion,
 } from '../normalize';
 import type { NormalizedListing } from '../types';
 import type { ScraperSource } from './source-interface';
 
 const BASE = 'https://auto.bazos.sk';
 
-// Bazoš has a flat HTML structure with `.inzeratynadpis` blocks — tune
-// against live DOM via WebFetch after first run.
-const SEL = {
-  card: '.inzeraty, .inzeratynadpis, [data-listing-id]',
-  title: '.inzeratynadpis h2 a, h2 a, .nadpis a',
-  link: 'a[href*="/inzerat/"]',
-  price: '.inzeratycena, .cena',
-  description: '.popis, .inzeratypopis',
-  region: '.inzeratylok, .lokalita',
-  // Bazoš puts year+km+fuel inside description text; we parse from there
-  // as fallback.
-} as const;
+// Bazoš listing detail URLs: /inzerat/<numericId>/<slug>.php — anchor as
+// card detector, parent block holds the description text (year/km/fuel hints).
+const LISTING_URL_RE = /^\/inzerat\/(\d+)\/[^?#]*\.php$/;
 
 export function parseListingsPage(html: string): NormalizedListing[] {
   const $ = cheerio.load(html);
   const results: NormalizedListing[] = [];
+  const seen = new Set<string>();
 
-  $(SEL.card).each((_, el) => {
-    const $el = $(el);
-    const $link = $el.find(SEL.link).first();
-    const href = $link.attr('href');
+  $('a[href]').each((_, el) => {
+    const href = $(el).attr('href');
     if (!href) return;
-    const url = href.startsWith('http') ? href : `${BASE}${href}`;
-    const sourceId = extractListingId(url);
-    if (!sourceId) return;
+    const match = LISTING_URL_RE.exec(href);
+    if (!match) return;
+    const sourceId = match[1]!;
+    if (seen.has(sourceId)) return;
+    seen.add(sourceId);
 
-    const title = textOrNull($el.find(SEL.title).first());
-    const description = textOrNull($el.find(SEL.description).first()) ?? title ?? '';
+    const url = `${BASE}${href}`;
+    const $anchor = $(el);
+    // Bazoš structures vary — climb 2-3 levels to grab description + price.
+    const $card =
+      $anchor.closest('table').length > 0
+        ? $anchor.closest('tr, table')
+        : $anchor.parent().parent().length
+          ? $anchor.parent().parent()
+          : $anchor.parent();
+    const title = $anchor.text().trim() || null;
+    const cardText = $card.text();
+
     const { makeSlug, modelSlug } = parseMakeModel(title);
-    const priceEur = parseEur(textOrNull($el.find(SEL.price).first()));
-    // Bazoš listings often embed year + km in the body. Try to parse them.
-    const year = parseYear(description) ?? parseYear(title);
-    const mileageKm = parseKm(extractKmHint(description));
-    const fuel = parseFuel(extractFuelHint(description));
-    const transmission = parseTransmission(extractTransmissionHint(description));
-    const region = textOrNull($el.find(SEL.region).first());
+    const priceEur = extractEurFromText(cardText);
+    const year = extractYearFromText(cardText);
+    const mileageKm = extractKmFromText(cardText);
+    const fuel = parseFuel(extractFuelHintFromText(cardText));
+    const transmission = parseTransmission(extractTransmissionHintFromText(cardText));
+    const region = prefixRegion(extractLocationHint(cardText), 'SK');
 
     results.push({
       source: 'bazos.sk',
@@ -62,7 +66,7 @@ export function parseListingsPage(html: string): NormalizedListing[] {
       transmission,
       region,
       rawTitle: title,
-      rawPayload: { html: $el.html() ?? '' },
+      rawPayload: { capturedAt: new Date().toISOString() },
     });
   });
 
@@ -73,35 +77,16 @@ export const bazosSk: ScraperSource = {
   id: 'bazos.sk',
   baseUrl: BASE,
   pageUrl({ page }) {
-    // Bazoš pagination: ?strana=N. Listings on the front page already cover
-    // active inventory; deeper pages walk historical.
-    return `${BASE}/?strana=${page}`;
+    // Bazoš pagination is offset-based: /0/, /20/, /40/, ... 20 per page.
+    const offset = (page - 1) * 20;
+    return `${BASE}/${offset === 0 ? '' : `${offset}/`}`;
   },
   parseListingsPage,
 };
 
-function textOrNull($el: { text(): string; length: number }): string | null {
-  if ($el.length === 0) return null;
-  const text = $el.text().trim();
-  return text.length > 0 ? text : null;
-}
-
-function extractListingId(url: string): string | null {
-  const m = /\/inzerat\/(\d+)/.exec(url);
-  return m?.[1] ?? null;
-}
-
-function extractKmHint(text: string): string | null {
-  const m = /(\d[\d\s]{2,})\s*(km|kilometr)/i.exec(text);
-  return m?.[1] ?? null;
-}
-
-function extractFuelHint(text: string): string | null {
-  const m = /\b(benzín|benzin|nafta|diesel|hybrid|elektro|lpg|cng)\b/i.exec(text);
-  return m?.[1] ?? null;
-}
-
-function extractTransmissionHint(text: string): string | null {
-  const m = /\b(manuálna|manuální|manual|automat|automatická)\b/i.exec(text);
-  return m?.[1] ?? null;
+// Bazoš location is a city name + postal code, e.g. "Žiar nad Hronom 965 01".
+// We capture the leading word(s) before the postal code as a coarse region.
+function extractLocationHint(text: string): string | null {
+  const m = /([A-ZÁČĎÉÍĽĹŇÓÔŔŠŤÚÝŽ][\p{L}\s-]{1,40})\s+\d{3}\s?\d{2}/u.exec(text);
+  return m?.[1]?.trim() ?? null;
 }

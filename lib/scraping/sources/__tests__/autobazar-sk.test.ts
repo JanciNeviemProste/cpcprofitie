@@ -1,10 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { parseListingsPage } from '../autobazar-sk';
+import { parseListingsPage, autobazarSk } from '../autobazar-sk';
 import { __resetRobotsCache } from '../../scrape';
 
-// __dirname isn't defined under ESM; resolve relative to this file's URL.
 const FIXTURE = readFileSync(
   fileURLToPath(new URL('../__fixtures__/autobazar-sk-listing.html', import.meta.url)),
   'utf8',
@@ -13,48 +12,59 @@ const FIXTURE = readFileSync(
 beforeEach(() => __resetRobotsCache());
 afterEach(() => __resetRobotsCache());
 
-describe('parseListingsPage (autobazar.sk fixture)', () => {
-  it('extracts every card from the fixture', () => {
+describe('autobazar.sk parseListingsPage', () => {
+  it('extracts every listing-shaped anchor from the fixture', () => {
     const listings = parseListingsPage(FIXTURE);
     expect(listings).toHaveLength(3);
   });
 
-  it('makes relative listing URLs absolute against the BASE host', () => {
+  it('ignores non-listing anchors (footer, login, etc.)', () => {
     const listings = parseListingsPage(FIXTURE);
-    expect(listings[0]?.url).toBe('https://www.autobazar.sk/auto/abc-123/');
+    const ids = listings.map((l) => l.sourceId);
+    expect(ids).not.toContain('o-portali');
+    expect(ids).not.toContain('login');
   });
 
-  it('preserves already-absolute listing URLs verbatim', () => {
-    const listings = parseListingsPage(FIXTURE);
-    expect(listings[1]?.url).toBe('https://www.autobazar.sk/auto/def-456/');
+  it('extracts numeric sourceId from /<numericId>/<slug>/ URLs', () => {
+    const ids = parseListingsPage(FIXTURE).map((l) => l.sourceId);
+    expect(ids).toEqual(['28199857', '29001122', '29002233']);
   });
 
-  it('parses Slovak prices, mileages, years, fuel, transmission, region', () => {
+  it('absolutizes URLs against autobazar.sk host', () => {
+    const [first] = parseListingsPage(FIXTURE);
+    expect(first?.url).toBe('https://www.autobazar.sk/28199857/skoda-octavia-1-6-tdi-combi/');
+  });
+
+  it('parses price, year, mileage, fuel, transmission from card text', () => {
     const [octavia, bmw] = parseListingsPage(FIXTURE);
-    expect(octavia?.priceEur).toBe(14990);
-    expect(octavia?.mileageKm).toBe(120000);
+    expect(octavia?.priceEur).toBe(12990);
     expect(octavia?.year).toBe(2019);
+    expect(octavia?.mileageKm).toBe(145000);
     expect(octavia?.fuel).toBe('diesel');
     expect(octavia?.transmission).toBe('manual');
-    expect(octavia?.region).toBe('Bratislavský');
     expect(bmw?.priceEur).toBe(22500);
     expect(bmw?.transmission).toBe('automatic');
   });
 
-  it('coerces unparseable price / mileage to null without dropping the row', () => {
-    const audi = parseListingsPage(FIXTURE)[2];
-    expect(audi?.rawTitle).toContain('Audi A4');
-    expect(audi?.priceEur).toBeNull();
-    expect(audi?.mileageKm).toBeNull();
+  it('tags SK regions with the SK- prefix', () => {
+    const [octavia, bmw] = parseListingsPage(FIXTURE);
+    expect(octavia?.region).toBe('SK-Bratislavský');
+    expect(bmw?.region).toBe('SK-Košický');
   });
 
-  it('returns an empty array on a no-cards page', () => {
-    const empty = parseListingsPage('<html><body><p>nič</p></body></html>');
-    expect(empty).toEqual([]);
+  it('drops raw HTML from rawPayload (only capturedAt remains)', () => {
+    const [first] = parseListingsPage(FIXTURE);
+    expect(first?.rawPayload).toHaveProperty('capturedAt');
+    expect(first?.rawPayload).not.toHaveProperty('html');
   });
 
-  it('extracts a stable sourceId from the URL path', () => {
-    const ids = parseListingsPage(FIXTURE).map((l) => l.sourceId);
-    expect(ids).toEqual(['abc-123', 'def-456', 'ghi-789']);
+  it('returns [] on a no-listings page', () => {
+    expect(parseListingsPage('<html><body><p>nič</p></body></html>')).toEqual([]);
+  });
+
+  it('source descriptor pageUrl is valid', () => {
+    const url = autobazarSk.pageUrl({ page: 2 });
+    expect(url).toContain('page=2');
+    expect(() => new URL(url)).not.toThrow();
   });
 });

@@ -1,31 +1,25 @@
 <!doctype html>
-<!-- Synthetic Sauto.cz fixture. Real listings use richer markup with
-  data-testid attrs; selectors here mirror the placeholder set. -->
+<!-- sauto.cz real DOM: card is an <a href="/osobni/detail/<brand>/<model>/<id>">
+  wrapping an <h3> title and a few <p> blocks: meta (rok/km/fuel/transmission
+  comma-separated), price in CZK, seller, location. -->
 <html lang="cs">
   <body>
     <main>
-      <article class="c-item" data-testid="listing-card">
-        <a class="c-item__link" data-testid="listing-link" href="/osobni-auta/skoda/octavia/123456">
-          <h2 class="c-item__title" data-testid="listing-title">Škoda Octavia 2.0 TDI</h2>
-        </a>
-        <span class="c-item__price" data-testid="listing-price">385 000 Kč</span>
-        <span class="c-item__year" data-testid="listing-year">2019</span>
-        <span class="c-item__km" data-testid="listing-mileage">128 000 km</span>
-        <span class="c-item__fuel" data-testid="listing-fuel">Diesel</span>
-        <span class="c-item__transmission" data-testid="listing-transmission">Manuální</span>
-        <span class="c-item__location" data-testid="listing-region">Praha</span>
-      </article>
-      <article class="c-item" data-testid="listing-card">
-        <a class="c-item__link" data-testid="listing-link" href="https://www.sauto.cz/osobni-auta/bmw/3-series/789012">
-          <h2 class="c-item__title" data-testid="listing-title">BMW 320d xDrive</h2>
-        </a>
-        <span class="c-item__price" data-testid="listing-price">595 000 Kč</span>
-        <span class="c-item__year" data-testid="listing-year">2020</span>
-        <span class="c-item__km" data-testid="listing-mileage">85 000 km</span>
-        <span class="c-item__fuel" data-testid="listing-fuel">Diesel</span>
-        <span class="c-item__transmission" data-testid="listing-transmission">Automatická</span>
-        <span class="c-item__location" data-testid="listing-region">Brno</span>
-      </article>
+      <a href="/osobni/detail/skoda/octavia/210399851">
+        <h3>Škoda Octavia, 1,5 e-TEC 110 Style DSG</h3>
+        <p>2022, 62 200 km, Benzín, Automatická</p>
+        <p>469 000 Kč</p>
+        <p>AUTO RUPEXIM s.r.o.</p>
+        <p>Praha-západ</p>
+      </a>
+      <a href="/osobni/detail/bmw/3-series/210400123">
+        <h3>BMW 320d xDrive</h3>
+        <p>2020, 85 000 km, Diesel, Automatická</p>
+        <p>595 000 Kč</p>
+        <p>Soukromý prodejce</p>
+        <p>Brno</p>
+      </a>
+      <a href="/o-nas">O nás</a>
     </main>
   </body>
 </html>

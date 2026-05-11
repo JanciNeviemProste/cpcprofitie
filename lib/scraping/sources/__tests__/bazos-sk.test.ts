@@ -9,43 +9,48 @@ const FIXTURE = readFileSync(
 );
 
 describe('bazos.sk parseListingsPage', () => {
-  it('extracts listings from the fixture', () => {
+  it('extracts /inzerat/<id>/<slug>.php anchors', () => {
     const listings = parseListingsPage(FIXTURE);
-    expect(listings.length).toBeGreaterThanOrEqual(2);
+    expect(listings).toHaveLength(2);
+  });
+
+  it('extracts numeric sourceId from URL', () => {
+    const ids = parseListingsPage(FIXTURE).map((l) => l.sourceId);
+    expect(ids).toEqual(['191630983', '191701234']);
   });
 
   it('parses year + km + fuel + transmission from description text', () => {
-    const listings = parseListingsPage(FIXTURE);
-    const octavia = listings.find((l) => l.rawTitle?.includes('Octavia'));
+    const [tiguan, octavia] = parseListingsPage(FIXTURE);
+    expect(tiguan?.year).toBe(2022);
+    expect(tiguan?.mileageKm).toBe(95000);
+    expect(tiguan?.fuel).toBe('diesel');
+    expect(tiguan?.transmission).toBe('automatic');
     expect(octavia?.year).toBe(2017);
     expect(octavia?.mileageKm).toBe(165000);
-    expect(octavia?.fuel).toBe('diesel');
     expect(octavia?.transmission).toBe('manual');
   });
 
-  it('parses BMW listing with automat transmission', () => {
-    const listings = parseListingsPage(FIXTURE);
-    const bmw = listings.find((l) => l.rawTitle?.includes('BMW'));
-    expect(bmw?.year).toBe(2020);
-    expect(bmw?.transmission).toBe('automatic');
-    expect(bmw?.priceEur).toBe(21500);
+  it('parses EUR price', () => {
+    const [tiguan, octavia] = parseListingsPage(FIXTURE);
+    expect(tiguan?.priceEur).toBe(19990);
+    expect(octavia?.priceEur).toBe(7900);
   });
 
-  it('extracts numeric sourceId from /inzerat/<id>/ URLs', () => {
-    const listings = parseListingsPage(FIXTURE);
-    expect(listings.map((l) => l.sourceId)).toContain('111222');
-    expect(listings.map((l) => l.sourceId)).toContain('333444');
+  it('extracts city as region with SK- prefix', () => {
+    const [tiguan, octavia] = parseListingsPage(FIXTURE);
+    expect(tiguan?.region).toBe('SK-Žiar nad Hronom');
+    expect(octavia?.region).toBe('SK-Trnava');
   });
 
-  it('tags listings with source=bazos.sk', () => {
-    for (const l of parseListingsPage(FIXTURE)) {
-      expect(l.source).toBe('bazos.sk');
-    }
+  it('source pageUrl uses /N/ offset pagination, page=1 has no offset', () => {
+    expect(bazosSk.pageUrl({ page: 1 })).toBe('https://auto.bazos.sk/');
+    expect(bazosSk.pageUrl({ page: 2 })).toBe('https://auto.bazos.sk/20/');
+    expect(bazosSk.pageUrl({ page: 4 })).toBe('https://auto.bazos.sk/60/');
   });
-});
 
-describe('bazos.sk source descriptor', () => {
-  it('pageUrl uses strana= pagination', () => {
-    expect(bazosSk.pageUrl({ page: 2 })).toContain('strana=2');
+  it('drops raw HTML from rawPayload', () => {
+    const [tiguan] = parseListingsPage(FIXTURE);
+    expect(tiguan?.rawPayload).toHaveProperty('capturedAt');
+    expect(tiguan?.rawPayload).not.toHaveProperty('html');
   });
 });

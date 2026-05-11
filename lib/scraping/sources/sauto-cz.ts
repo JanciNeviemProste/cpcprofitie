@@ -1,60 +1,55 @@
 import * as cheerio from 'cheerio';
 import {
   czkToEur,
-  parseCzk,
-  parseEur,
+  extractCzkFromText,
+  extractEurFromText,
+  extractFuelHintFromText,
+  extractKmFromText,
+  extractTransmissionHintFromText,
+  extractYearFromText,
   parseFuel,
-  parseKm,
   parseMakeModel,
   parseTransmission,
-  parseYear,
+  prefixRegion,
 } from '../normalize';
 import type { NormalizedListing } from '../types';
 import type { ScraperSource } from './source-interface';
 
 const BASE = 'https://www.sauto.cz';
 
-// Placeholder selectors — sauto.cz uses a richer card layout; tune after the
-// first production fetch via WebFetch.
-const SEL = {
-  card: '[data-testid="listing-card"], article.c-item, .sds-listing-item',
-  title: '[data-testid="listing-title"], h2.c-item__title, .sds-listing-item__title',
-  link: 'a[href*="/osobni-auta/"], a[href*="/inzerat/"]',
-  price: '[data-testid="listing-price"], .c-item__price, .sds-listing-item__price',
-  year: '[data-testid="listing-year"], .c-item__year',
-  mileage: '[data-testid="listing-mileage"], .c-item__km',
-  fuel: '[data-testid="listing-fuel"], .c-item__fuel',
-  transmission: '[data-testid="listing-transmission"], .c-item__transmission',
-  region: '[data-testid="listing-region"], .c-item__location, .sds-listing-item__location',
-} as const;
+// sauto.cz listing detail URLs: /osobni/detail/<brand>/<model>/<numericId>.
+// The card markup wraps an anchor with this href, an <h3> title, and a few
+// <p> blocks with year/km/fuel/transmission, price, seller, and location.
+const LISTING_URL_RE = /^\/osobni\/detail\/([^/]+)\/([^/]+)\/(\d+)\/?$/;
 
 export function parseListingsPage(html: string): NormalizedListing[] {
   const $ = cheerio.load(html);
   const results: NormalizedListing[] = [];
+  const seen = new Set<string>();
 
-  $(SEL.card).each((_, el) => {
-    const $el = $(el);
-    const $link = $el.find(SEL.link).first();
-    const href = $link.attr('href');
+  $('a[href]').each((_, el) => {
+    const href = $(el).attr('href');
     if (!href) return;
-    const url = href.startsWith('http') ? href : `${BASE}${href}`;
-    const sourceId = extractListingId(url);
-    if (!sourceId) return;
+    const match = LISTING_URL_RE.exec(href);
+    if (!match) return;
+    const sourceId = match[3]!;
+    if (seen.has(sourceId)) return;
+    seen.add(sourceId);
 
-    const title = textOrNull($el.find(SEL.title).first());
+    const url = `${BASE}${href.endsWith('/') ? href : `${href}/`}`;
+    const $anchor = $(el);
+    const $title = $anchor.find('h3').first();
+    const title = ($title.text() ?? $anchor.attr('title') ?? '').trim() || null;
+    const cardText = $anchor.text();
+
     const { makeSlug, modelSlug } = parseMakeModel(title);
-    // Sauto.cz prices are in Kč; convert to EUR but keep the raw value for
-    // audit. parseEur catches the rare case the listing already shows EUR.
-    const priceText = textOrNull($el.find(SEL.price).first());
-    const priceCzk = parseCzk(priceText);
-    const priceEur = priceCzk != null ? czkToEur(priceCzk) : parseEur(priceText);
-    const year = parseYear(textOrNull($el.find(SEL.year).first()));
-    const mileageKm = parseKm(textOrNull($el.find(SEL.mileage).first()));
-    const fuel = parseFuel(textOrNull($el.find(SEL.fuel).first()));
-    const transmission = parseTransmission(textOrNull($el.find(SEL.transmission).first()));
-    // Prefix CZ regions so dashboards can split SK vs CZ markets.
-    const rawRegion = textOrNull($el.find(SEL.region).first());
-    const region = rawRegion ? `CZ-${rawRegion}` : null;
+    const priceCzk = extractCzkFromText(cardText);
+    const priceEur = priceCzk != null ? czkToEur(priceCzk) : extractEurFromText(cardText);
+    const year = extractYearFromText(cardText);
+    const mileageKm = extractKmFromText(cardText);
+    const fuel = parseFuel(extractFuelHintFromText(cardText));
+    const transmission = parseTransmission(extractTransmissionHintFromText(cardText));
+    const region = prefixRegion(extractCzLocation(cardText), 'CZ');
 
     results.push({
       source: 'sauto.cz',
@@ -70,7 +65,7 @@ export function parseListingsPage(html: string): NormalizedListing[] {
       transmission,
       region,
       rawTitle: title,
-      rawPayload: { html: $el.html() ?? '' },
+      rawPayload: { capturedAt: new Date().toISOString() },
     });
   });
 
@@ -86,14 +81,39 @@ export const sautoCz: ScraperSource = {
   parseListingsPage,
 };
 
-function textOrNull($el: { text(): string; length: number }): string | null {
-  if ($el.length === 0) return null;
-  const text = $el.text().trim();
-  return text.length > 0 ? text : null;
-}
+// Czech locations on sauto.cz look like "Praha", "Praha-západ", "Brno",
+// "Středočeský". Without a dedicated DOM marker we look for a CZ-shaped
+// token after the seller name (last token line, before the image link).
+const CZ_LOCATION_HINTS = [
+  'Praha',
+  'Brno',
+  'Ostrava',
+  'Plzeň',
+  'Liberec',
+  'Olomouc',
+  'Hradec',
+  'Pardubice',
+  'Středočeský',
+  'Jihočeský',
+  'Karlovarský',
+  'Ústecký',
+  'Pardubický',
+  'Vysočina',
+  'Jihomoravský',
+  'Olomoucký',
+  'Zlínský',
+  'Moravskoslezský',
+];
 
-function extractListingId(url: string): string | null {
-  // Sauto.cz uses URLs like /osobni-auta/skoda/octavia/12345 or /inzerat/12345
-  const m = /\/(?:inzerat|osobni-auta\/[^/]+\/[^/]+)\/(\d+)/.exec(url);
-  return m?.[1] ?? null;
+function extractCzLocation(text: string): string | null {
+  for (const c of CZ_LOCATION_HINTS) {
+    if (text.includes(c)) {
+      // Capture "Praha-západ" and similar suffixed variants. Use Unicode
+      // letter class so Czech diacritics (á, í, é, ž, š) match.
+      const re = new RegExp(`${c}[-\\p{L}\\d]*`, 'u');
+      const m = re.exec(text);
+      return m?.[0] ?? c;
+    }
+  }
+  return null;
 }

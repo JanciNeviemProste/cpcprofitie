@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getCurrentUser } from '@/lib/auth/server';
+import { isSameOrigin } from '@/lib/auth/csrf';
 import {
   ALL_SOURCES,
   getSource,
@@ -27,6 +28,9 @@ function parseAdminAllowlist(): string[] {
 type Ctx = { params: Promise<{ source: string }> };
 
 export async function POST(request: Request, ctx: Ctx) {
+  if (!isSameOrigin(request)) {
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+  }
   const user = await getCurrentUser();
   if (!user?.email) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
