@@ -3,7 +3,7 @@ import type { NormalizedDetail, NormalizedListing, Source } from '../types';
 // Shared UA string. Every CPCProfit scraper identifies itself the same way so
 // site operators can attribute traffic + block / allow uniformly.
 export const USER_AGENT =
-  'CPCProfit-Bot/0.1 (+https://cpcprofit.sk/bot) — respects robots.txt; contact: hello@cpcprofit.sk';
+  'CPCProfit-Bot/0.1 (+https://cpcprofit.sk/bot) - respects robots.txt; contact: hello@cpcprofit.sk';
 
 /** A single source plugin. Generic runScrape() in `../scrape.ts` drives the
  *  listing-page side; runEnrichment() optionally fetches detail pages when

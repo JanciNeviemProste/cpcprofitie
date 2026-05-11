@@ -1,5 +1,10 @@
 import type { Config } from 'drizzle-kit';
+import { config as loadEnv } from 'dotenv';
 import { getDatabaseUrl } from './lib/db/url';
+
+// drizzle-kit doesn't auto-load .env files; pull them in explicitly.
+loadEnv({ path: '.env.local' });
+loadEnv({ path: '.env' });
 
 // Migrations require a direct (non-pooled) connection; Vercel-Supabase exposes
 // POSTGRES_URL_NON_POOLING for this. Fall back to DATABASE_URL for projects
