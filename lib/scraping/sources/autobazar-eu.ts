@@ -72,11 +72,53 @@ export function parseListingsPage(html: string): NormalizedListing[] {
   return results;
 }
 
+// /vysledky/osobne-vozidla/?strana=N has no pagination effect (same 20 every
+// page). But ?vyrobca=BRAND returns 20 unique listings per brand. We iterate
+// brands the same way we do for autobazar.sk.
+const TOP_BRANDS_EU = [
+  'audi',
+  'bmw',
+  'skoda',
+  'volkswagen',
+  'mercedes-benz',
+  'ford',
+  'kia',
+  'hyundai',
+  'opel',
+  'peugeot',
+  'renault',
+  'toyota',
+  'volvo',
+  'mazda',
+  'nissan',
+  'fiat',
+  'citroen',
+  'seat',
+  'honda',
+  'suzuki',
+  'dacia',
+  'land-rover',
+  'mini',
+  'jeep',
+  'mitsubishi',
+  'jaguar',
+  'alfa-romeo',
+  'lexus',
+  'porsche',
+  'smart',
+  'tesla',
+  'chevrolet',
+  'chrysler',
+  'dodge',
+  'subaru',
+];
+
 export const autobazarEu: ScraperSource = {
   id: 'autobazar.eu',
   baseUrl: BASE,
   pageUrl({ page }) {
-    return `${BASE}/vysledky/osobne-vozidla/?strana=${page}`;
+    const brand = TOP_BRANDS_EU[(page - 1) % TOP_BRANDS_EU.length] ?? 'audi';
+    return `${BASE}/vysledky/osobne-vozidla/?vyrobca=${brand}`;
   },
   parseListingsPage,
 };
