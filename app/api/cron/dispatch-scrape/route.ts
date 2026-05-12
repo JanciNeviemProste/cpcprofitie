@@ -74,8 +74,14 @@ export async function GET(request: Request) {
 
       let enrichment: PerSource['enrichment'];
       if (source.parseDetailPage) {
+        // When the caller filtered to a single source, we can afford more
+        // detail fetches because the 300s budget isn't shared with siblings.
+        // autobazar.eu has the deepest photo pool (≈10 per listing) so this
+        // matters most for it.
+        const enrichLimit =
+          sourceFilter && id === 'autobazar.eu' ? 100 : ENRICH_LIMIT_PER_RUN;
         const enrichResult = await runEnrichment(source, result.listings, {
-          limit: ENRICH_LIMIT_PER_RUN,
+          limit: enrichLimit,
         });
         const detailCounts = await persistDetails(enrichResult.details);
         enrichment = {

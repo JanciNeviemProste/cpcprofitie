@@ -56,8 +56,10 @@ describe('autobazar.eu parseListingsPage', () => {
     const url2 = autobazarEu.pageUrl({ page: 2 });
     expect(() => new URL(url1)).not.toThrow();
     expect(() => new URL(url2)).not.toThrow();
+    // page 1 may be a brand-only bucket (.../skoda/) and page 2 may be
+    // brand+model (.../skoda/octavia/). Both shapes are valid.
     expect(url1).toMatch(
-      /^https:\/\/www\.autobazar\.eu\/vysledky\/osobne-vozidla\/[a-z0-9-]+\/[a-z0-9-]+\/$/,
+      /^https:\/\/www\.autobazar\.eu\/vysledky\/osobne-vozidla\/[a-z0-9-]+\/([a-z0-9-]+\/)?$/,
     );
     expect(url1).not.toBe(url2);
   });
