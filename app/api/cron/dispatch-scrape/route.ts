@@ -74,12 +74,10 @@ export async function GET(request: Request) {
 
       let enrichment: PerSource['enrichment'];
       if (source.parseDetailPage) {
-        // When the caller filtered to a single source, we can afford more
-        // detail fetches because the 300s budget isn't shared with siblings.
-        // autobazar.eu has the deepest photo pool (≈10 per listing) so this
-        // matters most for it.
-        const enrichLimit =
-          sourceFilter && id === 'autobazar.eu' ? 100 : ENRICH_LIMIT_PER_RUN;
+        // Stay with the default 40-per-run enrich budget. Bumping to 100 for
+        // a single-source manual catch-up pushed bazos.eu past the 300s
+        // function timeout (~210s of fetches + parse + DB upserts).
+        const enrichLimit = ENRICH_LIMIT_PER_RUN;
         const enrichResult = await runEnrichment(source, result.listings, {
           limit: enrichLimit,
         });
