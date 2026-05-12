@@ -19,8 +19,11 @@ export const maxDuration = 300;
 
 const PROD = process.env.VERCEL_ENV === 'production';
 
-const PAGES_PER_RUN = 50;
-const ENRICH_LIMIT_PER_RUN = 60;
+// Per-source budget tuned to stay under 300s function timeout when running
+// scrape + enrichment together. Manual catch-up triggers (?source=X&startPage=N)
+// can still go wider since they hit one source at a time.
+const PAGES_PER_RUN = 30;
+const ENRICH_LIMIT_PER_RUN = 40;
 
 export async function GET(request: Request) {
   const expected = process.env.CRON_SECRET;
