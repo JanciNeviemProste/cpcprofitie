@@ -8,6 +8,7 @@ import { Menu, X } from 'lucide-react';
 const links = [
   { href: '/app/overview', label: 'Prehľad' },
   { href: '/app/market', label: 'Trh' },
+  { href: '/app/listings', label: 'Inzeráty' },
   { href: '/app/garage', label: 'Garáž' },
   { href: '/app/watchlist', label: 'Watchlist' },
   { href: '/app/ai-listing', label: 'AI inzerát' },

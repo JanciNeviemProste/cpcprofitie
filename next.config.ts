@@ -42,6 +42,16 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: '/(.*)', headers: SECURITY_HEADERS }];
   },
+  // Hot-link listing photos straight from each marketplace's CDN. We never
+  // rehost; next/image still optimises (resize, AVIF) on Vercel's edge.
+  images: {
+    remotePatterns: [
+      { protocol: 'https', hostname: 's.autobazar.eu' },
+      { protocol: 'https', hostname: 'img.autobazar.eu' },
+      { protocol: 'https', hostname: 'img.autobazar.sk' },
+      { protocol: 'https', hostname: 'img.bazos.sk' },
+    ],
+  },
   poweredByHeader: false,
 };
 
