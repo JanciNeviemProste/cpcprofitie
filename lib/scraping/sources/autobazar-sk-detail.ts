@@ -3,6 +3,15 @@
 // listing URL directly.
 
 import * as cheerio from 'cheerio';
+import {
+  extractFuelHintFromText,
+  extractKmFromText,
+  extractTransmissionHintFromText,
+  extractYearFromText,
+  parseFuel,
+  parseTransmission,
+  prefixRegion,
+} from '../normalize';
 import type { NormalizedDetail, NormalizedListing, SellerType } from '../types';
 
 const NUM_RE = /(\d[\d\s]*)/;
@@ -78,6 +87,28 @@ export function parseDetailPage(html: string, listing: NormalizedListing): Norma
     }
   });
 
+  // Backfill year/km/fuel/region into listings when detail page has them
+  // and the list-page extraction missed (or is null).
+  const yearRaw = extractAfterLabel(fullText, 'Rok výroby') ?? extractAfterLabel(fullText, 'Rok');
+  const year = parseIntFromText(yearRaw) ?? extractYearFromText(yearRaw);
+  const kmRaw =
+    extractAfterLabel(fullText, 'Najazdené') ?? extractAfterLabel(fullText, 'Stav km');
+  const mileageKm = extractKmFromText(kmRaw ?? '') ?? parseIntFromText(kmRaw);
+  const fuelHint = extractAfterLabel(fullText, 'Palivo');
+  const fuel = parseFuel(extractFuelHintFromText(fuelHint ?? ''));
+  const transHint = extractAfterLabel(fullText, 'Prevodovka');
+  const transmission = parseTransmission(extractTransmissionHintFromText(transHint ?? ''));
+  const locRaw = extractAfterLabel(fullText, 'Lokalita') ?? extractAfterLabel(fullText, 'Mesto');
+  const region = prefixRegion(locRaw, 'SK');
+
+  const listingOverrides: NormalizedDetail['listingOverrides'] = {};
+  if (year != null && year >= 1980 && year <= new Date().getFullYear() + 1)
+    listingOverrides.year = year;
+  if (mileageKm != null && mileageKm > 0) listingOverrides.mileageKm = mileageKm;
+  if (fuel != null) listingOverrides.fuel = fuel;
+  if (transmission != null) listingOverrides.transmission = transmission;
+  if (region != null) listingOverrides.region = region;
+
   return {
     source: listing.source,
     sourceId: listing.sourceId,
@@ -92,6 +123,7 @@ export function parseDetailPage(html: string, listing: NormalizedListing): Norma
     sellerType,
     sellerName,
     equipment: equipment.slice(0, 200),
+    listingOverrides: Object.keys(listingOverrides).length > 0 ? listingOverrides : undefined,
   };
 }
 

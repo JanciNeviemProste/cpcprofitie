@@ -2,6 +2,7 @@
 // `record.findById` tRPC query result into `__NEXT_DATA__`, so we don't have
 // to scrape rendered DOM at all — we just JSON-parse the script tag.
 
+import { parseFuel, parseTransmission, prefixRegion } from '../normalize';
 import type { NormalizedDetail, NormalizedListing, SellerType } from '../types';
 
 const NEXT_DATA_RE = /<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/;
@@ -31,6 +32,15 @@ type RawRecord = {
     displayName?: string | null;
     idFirm?: number | null;
   } | null;
+  // Fields for listing override write-back.
+  year?: number | null;
+  yearValue?: string | null;
+  mileage?: number | null;
+  finalPrice?: number | null;
+  price?: number | null;
+  fuelValue?: string | null;
+  gearboxValue?: string | null;
+  location?: { name?: string | null } | null;
 };
 
 function pickRecord(parsed: unknown): RawRecord | null {
@@ -138,6 +148,37 @@ export function parseDetailPage(
           .filter(Boolean)
       : [];
 
+  // Listing field overrides from the rich Next.js record. Always patches NULL
+  // columns only (handled in persistDetails), so safe to fill liberally.
+  const year =
+    typeof record.year === 'number' && Number.isFinite(record.year)
+      ? Math.round(record.year)
+      : typeof record.yearValue === 'string'
+        ? Number(record.yearValue.match(/\d{4}/)?.[0])
+        : null;
+  const mileageKm =
+    typeof record.mileage === 'number' && Number.isFinite(record.mileage)
+      ? Math.round(record.mileage)
+      : null;
+  const priceEur =
+    typeof record.finalPrice === 'number' && Number.isFinite(record.finalPrice)
+      ? Math.round(record.finalPrice)
+      : typeof record.price === 'number' && Number.isFinite(record.price)
+        ? Math.round(record.price)
+        : null;
+  const fuel = parseFuel(record.fuelValue ?? null);
+  const transmission = parseTransmission(record.gearboxValue ?? null);
+  const region = prefixRegion(record.location?.name ?? null, 'SK');
+
+  const listingOverrides: NormalizedDetail['listingOverrides'] = {};
+  if (year != null && year >= 1980 && year <= new Date().getFullYear() + 1)
+    listingOverrides.year = year;
+  if (mileageKm != null && mileageKm > 0) listingOverrides.mileageKm = mileageKm;
+  if (priceEur != null && priceEur >= 100) listingOverrides.priceEur = priceEur;
+  if (fuel != null) listingOverrides.fuel = fuel;
+  if (transmission != null) listingOverrides.transmission = transmission;
+  if (region != null) listingOverrides.region = region;
+
   return {
     source: 'autobazar.eu',
     sourceId: listing.sourceId,
@@ -159,5 +200,6 @@ export function parseDetailPage(
     sellerName,
     description: record.description?.trim() || null,
     equipment,
+    listingOverrides: Object.keys(listingOverrides).length > 0 ? listingOverrides : undefined,
   };
 }

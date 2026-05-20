@@ -18,7 +18,9 @@ import { getSource, runScrape } from '../lib/scraping';
 import { upsertListings, recordScrapeRun } from '../lib/scraping/persist';
 
 async function main() {
-  const pagesArg = Number(process.argv[2] ?? 100);
+  // Default 1000 pages × 20 = 20 000 listings (covers full bazos.sk inventory
+  // in DB ~19 954) so every existing row gets the new parser's title + price.
+  const pagesArg = Number(process.argv[2] ?? 1000);
   const source = getSource('bazos.sk');
   console.log(`Rescraping bazos.sk pages 1..${pagesArg} …`);
 

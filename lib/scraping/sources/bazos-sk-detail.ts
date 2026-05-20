@@ -17,6 +17,13 @@
 // <a href="...img/.../<id>.jpg">.
 
 import * as cheerio from 'cheerio';
+import {
+  extractFuelHintFromText,
+  extractTransmissionHintFromText,
+  parseFuel,
+  parseTransmission,
+  prefixRegion,
+} from '../normalize';
 import type { NormalizedDetail, NormalizedListing, SellerType } from '../types';
 
 export function detailUrl(listing: NormalizedListing): string {
@@ -72,6 +79,26 @@ export function parseDetailPage(html: string, listing: NormalizedListing): Norma
     description = $popis.text().trim().slice(0, 4000);
   }
 
+  // Detail page has more reliable meta than the list card. Extract overrides
+  // so persistDetails can patch any NULL year/km/region/fuel on the listing.
+  const yearRaw = extractAfterLabel(fullText, 'Rok výroby');
+  const year = parseYearFromLabel(yearRaw);
+  const kmRaw = extractAfterLabel(fullText, 'Najazdené');
+  const mileageKm = parseFirstInt(kmRaw);
+  const fuelHint = extractAfterLabel(fullText, 'Palivo');
+  const fuel = parseFuel(extractFuelHintFromText(fuelHint ?? ''));
+  const transHint = extractAfterLabel(fullText, 'Prevodovka');
+  const transmission = parseTransmission(extractTransmissionHintFromText(transHint ?? ''));
+  const locRaw = extractAfterLabel(fullText, 'Lokalita');
+  const region = prefixRegion(locRaw, 'SK');
+
+  const listingOverrides: NormalizedDetail['listingOverrides'] = {};
+  if (year != null) listingOverrides.year = year;
+  if (mileageKm != null && mileageKm > 0) listingOverrides.mileageKm = mileageKm;
+  if (fuel != null) listingOverrides.fuel = fuel;
+  if (transmission != null) listingOverrides.transmission = transmission;
+  if (region != null) listingOverrides.region = region;
+
   return {
     source: listing.source,
     sourceId: listing.sourceId,
@@ -86,7 +113,17 @@ export function parseDetailPage(html: string, listing: NormalizedListing): Norma
     sellerType,
     sellerName,
     equipment,
+    listingOverrides: Object.keys(listingOverrides).length > 0 ? listingOverrides : undefined,
   };
+}
+
+// "Rok výroby: 10/2018" → 2018. "Rok výroby: model 2020" → 2020.
+function parseYearFromLabel(s: string | null): number | null {
+  if (!s) return null;
+  const m = /(?:\d{1,2}\s*\/\s*)?(\d{4})/.exec(s);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n >= 1980 && n <= new Date().getFullYear() + 1 ? n : null;
 }
 
 function extractAfterLabel(text: string, label: string): string | null {

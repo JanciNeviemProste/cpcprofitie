@@ -73,4 +73,16 @@ export type NormalizedDetail = {
   sellerName: string | null;
   /** Flat list of equipment labels (klimatizácia, ABS, ESP, ...). */
   equipment: string[];
+  /** Optional write-back to the listings row. The detail page is usually
+   *  more accurate than list cards (full year/km/region/fuel labels),
+   *  so we fill these from detail when present and let persistDetails
+   *  patch any NULL columns on listings. Never overwrites non-null values. */
+  listingOverrides?: Partial<{
+    year: number;
+    mileageKm: number;
+    fuel: RawFuel;
+    transmission: RawTransmission;
+    region: string;
+    priceEur: number;
+  }>;
 };

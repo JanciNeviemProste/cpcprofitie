@@ -394,6 +394,27 @@ export async function persistDetails(
           photosInserted += photoRows.length;
         }
       }
+
+      // Detail page typically has more accurate year/km/region/fuel than the
+      // list card. Patch any NULL columns on listings — never overwrite a
+      // non-null value because the list card might be the more trustworthy
+      // source for that field (e.g. price is on every list card).
+      if (d.listingOverrides) {
+        const o = d.listingOverrides;
+        const set: Record<string, unknown> = {};
+        if (o.year != null) set.year = sql`coalesce(${listings.year}, ${o.year})`;
+        if (o.mileageKm != null)
+          set.mileageKm = sql`coalesce(${listings.mileageKm}, ${o.mileageKm})`;
+        if (o.fuel != null) set.fuel = sql`coalesce(${listings.fuel}, ${o.fuel})`;
+        if (o.transmission != null)
+          set.transmission = sql`coalesce(${listings.transmission}, ${o.transmission})`;
+        if (o.region != null) set.region = sql`coalesce(${listings.region}, ${o.region})`;
+        if (o.priceEur != null)
+          set.priceEur = sql`coalesce(${listings.priceEur}, ${String(o.priceEur)})`;
+        if (Object.keys(set).length > 0) {
+          await db.update(listings).set(set).where(eq(listings.id, listingId));
+        }
+      }
     } catch (e) {
       console.error('persistDetails_row_failed', {
         source: d.source,
