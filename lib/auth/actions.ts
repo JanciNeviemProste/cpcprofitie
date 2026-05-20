@@ -15,6 +15,8 @@ import { safeNextPath } from './redirect';
 type ActionResult = { error: string } | void;
 
 function translate(message: string): string {
+  // Log raw error server-side so it appears in `pnpm dev` / Vercel logs.
+  console.warn('[auth] supabase error:', message);
   const m = message.toLowerCase();
   if (m.includes('invalid login credentials')) return 'Nesprávny e-mail alebo heslo.';
   if (m.includes('email not confirmed')) return 'E-mail ešte nie je potvrdený. Skontrolujte si schránku.';
@@ -22,6 +24,8 @@ function translate(message: string): string {
   if (m.includes('password should be at least')) return 'Heslo musí mať aspoň 6 znakov.';
   if (m.includes('rate limit')) return 'Príliš veľa pokusov. Skúste o chvíľu znova.';
   if (m.includes('email')) return 'Neplatný e-mail.';
+  // Echo raw message in non-prod so the dev sees what actually broke.
+  if (process.env.VERCEL_ENV !== 'production') return `Chyba: ${message}`;
   return 'Niečo sa pokazilo. Skúste to znova.';
 }
 
