@@ -14,7 +14,10 @@ export const maxDuration = 300;
 const PROD = process.env.VERCEL_ENV === 'production';
 const BATCH_SIZE = 50;
 const DELAY_MS = 1200;
-const TIME_BUDGET_MS = 250_000;
+// 3 batches of 50 listings at 1.2s = ~180s, plus DB writes + overhead.
+// Keep under 220s so the response definitely returns within Vercel's 300s
+// hard limit even if the last batch starts late.
+const TIME_BUDGET_MS = 180_000;
 
 export async function POST(request: Request) {
   const expected = process.env.CRON_SECRET;
