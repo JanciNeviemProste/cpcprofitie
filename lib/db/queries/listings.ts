@@ -261,3 +261,26 @@ export async function getSourceCounts(): Promise<SourceCount[]> {
     .orderBy(desc(sql`count(*)`));
   return rows.map((r) => ({ source: r.source as Source, count: r.n }));
 }
+
+export type ListingsStats = {
+  totalListings: number;
+  totalPhotos: number;
+  totalEnriched: number;
+  bySource: SourceCount[];
+};
+
+export async function getListingsStats(): Promise<ListingsStats> {
+  const db = getDb();
+  const [listingsCount, photosCount, enrichedCount, bySource] = await Promise.all([
+    db.select({ n: sql<number>`count(*)::int` }).from(listings),
+    db.select({ n: sql<number>`count(*)::int` }).from(listingPhotos),
+    db.select({ n: sql<number>`count(*)::int` }).from(listingDetails),
+    getSourceCounts(),
+  ]);
+  return {
+    totalListings: listingsCount[0]?.n ?? 0,
+    totalPhotos: photosCount[0]?.n ?? 0,
+    totalEnriched: enrichedCount[0]?.n ?? 0,
+    bySource,
+  };
+}

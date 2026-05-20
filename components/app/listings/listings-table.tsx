@@ -51,9 +51,9 @@ export function ListingsTable({ rows }: { rows: ListingRow[] }) {
     <div className="border-border/60 overflow-hidden rounded-lg border">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-muted/40 text-muted-foreground text-left text-xs uppercase">
+          <thead className="bg-muted/60 text-muted-foreground sticky top-0 z-10 text-left text-xs uppercase backdrop-blur">
             <tr>
-              <th className="px-3 py-2 w-20">Foto</th>
+              <th className="px-3 py-2 w-24">Foto</th>
               <th className="px-3 py-2">Inzerát</th>
               <th className="px-3 py-2 text-right">Rok</th>
               <th className="px-3 py-2 text-right">Km</th>
@@ -67,23 +67,24 @@ export function ListingsTable({ rows }: { rows: ListingRow[] }) {
             {rows.map((r) => {
               const href = `/app/listings/${r.id.toString()}`;
               return (
-                <tr key={r.id.toString()} className="border-border/40 hover:bg-muted/20 border-t">
+                <tr
+                  key={r.id.toString()}
+                  className="border-border/40 even:bg-muted/10 hover:bg-muted/30 border-t transition-colors"
+                >
                   <td className="px-3 py-2">
                     <Link href={href}>
                       {r.heroPhotoUrl ? (
-                        // Use plain <img> — many CDN URLs are tokenised + expire,
-                        // so we can't reliably re-fetch via next/image edge optimisation.
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={r.heroPhotoUrl}
                           alt=""
                           loading="lazy"
-                          width={80}
-                          height={56}
-                          className="border-border/40 h-14 w-20 rounded-sm border object-cover"
+                          width={96}
+                          height={64}
+                          className="border-border/40 h-16 w-24 rounded-md border object-cover"
                         />
                       ) : (
-                        <div className="border-border/40 bg-muted h-14 w-20 rounded-sm border" />
+                        <div className="border-border/40 bg-muted h-16 w-24 rounded-md border" />
                       )}
                     </Link>
                   </td>

@@ -58,3 +58,5 @@ next-env.d.ts
 # agent skills (installed via `npx skills add`)
 .agents/
 skills-lock.json
+
+.env*.local
