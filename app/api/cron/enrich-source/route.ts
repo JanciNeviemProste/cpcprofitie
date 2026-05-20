@@ -12,12 +12,12 @@ export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 const PROD = process.env.VERCEL_ENV === 'production';
-const BATCH_SIZE = 50;
+// Smaller batches mean more frequent deadline checks. Real-world detail
+// page fetches take 3-10s (not just the 1.2s crawl delay) so a batch of 10
+// fits in ~60s and we get 3-4 batches per 220s budget.
+const BATCH_SIZE = 10;
 const DELAY_MS = 1200;
-// 3 batches of 50 listings at 1.2s = ~180s, plus DB writes + overhead.
-// Keep under 220s so the response definitely returns within Vercel's 300s
-// hard limit even if the last batch starts late.
-const TIME_BUDGET_MS = 180_000;
+const TIME_BUDGET_MS = 220_000;
 
 export async function POST(request: Request) {
   const expected = process.env.CRON_SECRET;
