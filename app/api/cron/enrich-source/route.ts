@@ -14,7 +14,7 @@ export const maxDuration = 300;
 const PROD = process.env.VERCEL_ENV === 'production';
 const BATCH_SIZE = 50;
 const DELAY_MS = 1200;
-const TIME_BUDGET_MS = 280_000;
+const TIME_BUDGET_MS = 250_000;
 
 export async function POST(request: Request) {
   const expected = process.env.CRON_SECRET;
