@@ -214,10 +214,34 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
             fingerprint: sql`coalesce(${listings.fingerprint}, excluded.fingerprint)`,
           },
         })
-        .returning({ inserted: sql<boolean>`(xmax = 0)` });
+        .returning({
+          id: listings.id,
+          source: listings.source,
+          sourceId: listings.sourceId,
+          inserted: sql<boolean>`(xmax = 0)`,
+        });
       for (const row of result) {
         if (row.inserted) added++;
         else updated++;
+      }
+
+      // Persist list-page thumbnails captured in rawPayload.thumbnailUrl.
+      // ON CONFLICT DO NOTHING keeps existing rows — detail enrichment can
+      // later replace the whole album with delete+insert.
+      const thumbRows: Array<{ listingId: bigint; position: number; url: string }> = [];
+      for (const inserted of result) {
+        const original = chunk.find(
+          (c) => c.source === inserted.source && c.sourceId === inserted.sourceId,
+        );
+        const thumb = original?.rawJson?.thumbnailUrl;
+        if (typeof thumb !== 'string' || thumb.length === 0) continue;
+        thumbRows.push({ listingId: inserted.id, position: 1, url: thumb.slice(0, 2000) });
+      }
+      if (thumbRows.length > 0) {
+        await db
+          .insert(listingPhotos)
+          .values(thumbRows)
+          .onConflictDoNothing({ target: [listingPhotos.listingId, listingPhotos.position] });
       }
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);

@@ -1,36 +1,52 @@
 <!doctype html>
-<!-- Bazoš real DOM is table-based, anchors point at /inzerat/<id>/<slug>.php.
-  Description text carries year/km/fuel/transmission hints; price is in
-  a <strong>; location is a "City NNN NN" pattern. -->
+<!-- Snapshot of real auto.bazos.sk listing-page layout (May 2026).
+  Each listing block flows as flat siblings under the listings flex container:
+  thumbnail + title + post-date header + description + price. Region/lokalita
+  is intentionally absent here — bazos shows it only on the detail page. -->
 <html lang="sk">
   <body>
-    <table>
-      <tr>
-        <td>
-          <a href="/inzerat/191630983/volkswagen-tiguan-20tdi-dsg.php">
-            Volkswagen Tiguan 2.0 TDI DSG, odpočet DPH
-          </a>
-          <div>
-            Tiguan 2.0 TDI DSG, rok 2022, najazdené 95 000 km, nafta, automatická.
-            Plná servisná história.
-          </div>
-          <strong>19 990 €</strong>
-          <span>Žiar nad Hronom 965 01</span>
-          <span>5 x</span>
-        </td>
-      </tr>
-      <tr>
-        <td>
-          <a href="/inzerat/191701234/skoda-octavia-1-9-tdi.php">Škoda Octavia 1.9 TDI</a>
-          <div>
-            Predám Škoda Octavia rok 2017, najazdené 165 000 km, nafta, manuálna,
-            servisná knižka, ťažné. Stav výborný.
-          </div>
-          <strong>7 900 €</strong>
-          <span>Trnava 917 01</span>
-          <span>12 x</span>
-        </td>
-      </tr>
-    </table>
+    <div class="flexmain">
+      <div class="inzeratynadpis">
+        <a href="/inzerat/191942373/bmw-x3-30d-195kw-x-drive-automat-odpocet-dph.php"
+          ><img
+            src="https://www.bazos.sk/img/1t/373/191942373.jpg?t=1779301365"
+            class="obrazek"
+            alt="BMW X3, 3.0D 195KW X-DRIVE, Automat, Odpočet DPH"
+            width="170"
+            height="128"
+        /></a>
+      </div>
+      <h2 class="nadpis">
+        <a href="/inzerat/191942373/bmw-x3-30d-195kw-x-drive-automat-odpocet-dph.php"
+          >BMW X3, 3.0D 195KW X-DRIVE, Automat, Odpočet DPH</a
+        >
+      </h2>
+      <span class="velikost10"> - <span class="ztop">TOP</span> - [20.5. 2026]</span>
+      <div class="popis">
+        Ponúkame na predaj SUV BMW X3 generácie G01. r.v.: 10/2018, 2993cm³, 195kW, 139 730 km,
+        Diesel, Automat (8 st.), Pohon: xDrive 4x4.
+      </div>
+      <div class="inzeratycena"><b><span translate="no">  26 990 €</span></b></div>
+
+      <div class="inzeratynadpis">
+        <a href="/inzerat/191701234/skoda-octavia-1-9-tdi.php"
+          ><img
+            src="https://www.bazos.sk/img/1t/234/191701234.jpg"
+            class="obrazek"
+            alt="Škoda Octavia 1.9 TDI"
+            width="170"
+            height="128"
+        /></a>
+      </div>
+      <h2 class="nadpis">
+        <a href="/inzerat/191701234/skoda-octavia-1-9-tdi.php">Škoda Octavia 1.9 TDI</a>
+      </h2>
+      <span class="velikost10"> - [20.5. 2026]</span>
+      <div class="popis">
+        Predám Škoda Octavia rok 2017, najazdené 165 000 km, nafta, manuálna, servisná knižka,
+        ťažné. Stav výborný.
+      </div>
+      <div class="inzeratycena"><b><span translate="no">7 900 €</span></b></div>
+    </div>
   </body>
 </html>

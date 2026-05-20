@@ -16,30 +16,52 @@ describe('bazos.sk parseListingsPage', () => {
 
   it('extracts numeric sourceId from URL', () => {
     const ids = parseListingsPage(FIXTURE).map((l) => l.sourceId);
-    expect(ids).toEqual(['191630983', '191701234']);
+    expect(ids).toEqual(['191942373', '191701234']);
   });
 
-  it('parses year + km + fuel + transmission from description text', () => {
-    const [tiguan, octavia] = parseListingsPage(FIXTURE);
-    expect(tiguan?.year).toBe(2022);
-    expect(tiguan?.mileageKm).toBe(95000);
-    expect(tiguan?.fuel).toBe('diesel');
-    expect(tiguan?.transmission).toBe('automatic');
+  it('extracts title from h2.nadpis (not the thumbnail anchor)', () => {
+    const [bmw, octavia] = parseListingsPage(FIXTURE);
+    expect(bmw?.rawTitle).toBe('BMW X3, 3.0D 195KW X-DRIVE, Automat, Odpočet DPH');
+    expect(octavia?.rawTitle).toBe('Škoda Octavia 1.9 TDI');
+  });
+
+  it('parses car year from popis (ignoring post-date 2026)', () => {
+    const [bmw, octavia] = parseListingsPage(FIXTURE);
+    expect(bmw?.year).toBe(2018);
     expect(octavia?.year).toBe(2017);
+  });
+
+  it('parses mileage from popis', () => {
+    const [bmw, octavia] = parseListingsPage(FIXTURE);
+    expect(bmw?.mileageKm).toBe(139730);
     expect(octavia?.mileageKm).toBe(165000);
+  });
+
+  it('parses fuel + transmission from popis', () => {
+    const [bmw, octavia] = parseListingsPage(FIXTURE);
+    expect(bmw?.fuel).toBe('diesel');
+    expect(bmw?.transmission).toBe('automatic');
+    expect(octavia?.fuel).toBe('diesel');
     expect(octavia?.transmission).toBe('manual');
   });
 
-  it('parses EUR price', () => {
-    const [tiguan, octavia] = parseListingsPage(FIXTURE);
-    expect(tiguan?.priceEur).toBe(19990);
+  it('parses EUR price from .inzeratycena', () => {
+    const [bmw, octavia] = parseListingsPage(FIXTURE);
+    expect(bmw?.priceEur).toBe(26990);
     expect(octavia?.priceEur).toBe(7900);
   });
 
-  it('extracts city as region with SK- prefix', () => {
-    const [tiguan, octavia] = parseListingsPage(FIXTURE);
-    expect(tiguan?.region).toBe('SK-Žiar nad Hronom');
-    expect(octavia?.region).toBe('SK-Trnava');
+  it('leaves region null (bazos list-page has no location)', () => {
+    const [bmw, octavia] = parseListingsPage(FIXTURE);
+    expect(bmw?.region).toBeNull();
+    expect(octavia?.region).toBeNull();
+  });
+
+  it('captures thumbnail url in rawPayload', () => {
+    const [bmw] = parseListingsPage(FIXTURE);
+    expect(bmw?.rawPayload).toMatchObject({
+      thumbnailUrl: 'https://www.bazos.sk/img/1t/373/191942373.jpg?t=1779301365',
+    });
   });
 
   it('source pageUrl uses /N/ offset pagination, page=1 has no offset', () => {
@@ -48,9 +70,9 @@ describe('bazos.sk parseListingsPage', () => {
     expect(bazosSk.pageUrl({ page: 4 })).toBe('https://auto.bazos.sk/60/');
   });
 
-  it('drops raw HTML from rawPayload', () => {
-    const [tiguan] = parseListingsPage(FIXTURE);
-    expect(tiguan?.rawPayload).toHaveProperty('capturedAt');
-    expect(tiguan?.rawPayload).not.toHaveProperty('html');
+  it('does not leak raw HTML into rawPayload', () => {
+    const [bmw] = parseListingsPage(FIXTURE);
+    expect(bmw?.rawPayload).toHaveProperty('capturedAt');
+    expect(bmw?.rawPayload).not.toHaveProperty('html');
   });
 });
