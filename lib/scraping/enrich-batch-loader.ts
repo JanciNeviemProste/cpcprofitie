@@ -2,7 +2,7 @@
 // Used by both the local enrich-all scripts and the server-side
 // /api/cron/enrich-source endpoint.
 
-import { and, eq, isNull, notExists, sql } from 'drizzle-orm';
+import { and, eq, notExists, sql } from 'drizzle-orm';
 import { getDb } from '../db';
 import { listingDetails, listings } from '../db/schema';
 import type { NormalizedListing, Source } from './types';
@@ -29,7 +29,6 @@ export async function loadUnenrichedBatch(
     .where(
       and(
         eq(listings.source, source),
-        isNull(listings.removedAt),
         notExists(
           db
             .select({ x: sql`1` })
