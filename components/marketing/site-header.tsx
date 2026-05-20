@@ -39,7 +39,7 @@ export function SiteHeader() {
           >
             Prihlásiť sa
           </Link>
-          <Button size="sm" render={<Link href="/signup" />}>
+          <Button size="sm" render={<Link href="/register" />}>
             Vyskúšať zadarmo
           </Button>
         </div>

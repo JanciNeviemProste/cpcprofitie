@@ -1,10 +1,9 @@
 import Link from 'next/link';
-import { Suspense } from 'react';
-import { GoogleSignInButton } from '@/components/auth/google-sign-in-button';
+import { RegisterForm } from '@/components/auth/register-form';
 
 export const metadata = { title: 'Vytvoriť účet' };
 
-export default function SignupPage() {
+export default function RegisterPage() {
   return (
     <div className="bg-card/40 border-border/60 w-full max-w-md rounded-2xl border p-8 shadow-2xl backdrop-blur">
       <div className="text-center">
@@ -15,9 +14,7 @@ export default function SignupPage() {
       </div>
 
       <div className="mt-8">
-        <Suspense fallback={null}>
-          <GoogleSignInButton label="Pokračovať s Google" />
-        </Suspense>
+        <RegisterForm />
       </div>
 
       <ul className="text-muted-foreground mt-6 space-y-2 text-sm">

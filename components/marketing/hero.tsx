@@ -35,7 +35,7 @@ export function Hero() {
           </p>
 
           <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <Button size="lg" render={<Link href="/signup" />}>
+            <Button size="lg" render={<Link href="/register" />}>
               Vyskúšať 7 dní zadarmo
             </Button>
             <Button size="lg" variant="outline" render={<Link href="#features" />}>

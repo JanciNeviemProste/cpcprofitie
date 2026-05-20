@@ -21,7 +21,7 @@ export function CTABanner() {
           dealerov, ktorí už majú dáta na svojej strane.
         </p>
         <div className="relative mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-          <Button size="lg" render={<Link href="/signup" />}>
+          <Button size="lg" render={<Link href="/register" />}>
             Vyskúšať zadarmo
           </Button>
           <Button size="lg" variant="outline" render={<Link href="/contact" />}>

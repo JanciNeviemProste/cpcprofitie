@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { Suspense } from 'react';
-import { GoogleSignInButton } from '@/components/auth/google-sign-in-button';
+import { LoginForm } from '@/components/auth/login-form';
 
 export const metadata = { title: 'Prihlásenie' };
 
@@ -10,19 +10,19 @@ export default function LoginPage() {
       <div className="text-center">
         <h1 className="text-2xl font-bold tracking-tight">Prihlásenie do CPCProfit</h1>
         <p className="text-muted-foreground mt-2 text-sm">
-          Pokračujte cez Google. Žiadne ďalšie heslá na zapamätanie.
+          Zadajte svoj e-mail a heslo.
         </p>
       </div>
 
       <div className="mt-8">
         <Suspense fallback={null}>
-          <GoogleSignInButton label="Pokračovať s Google" />
+          <LoginForm />
         </Suspense>
       </div>
 
       <p className="text-muted-foreground mt-6 text-center text-sm">
         Nemáte účet?{' '}
-        <Link href="/signup" className="text-primary font-medium hover:underline">
+        <Link href="/register" className="text-primary font-medium hover:underline">
           Vytvoriť účet
         </Link>
       </p>

@@ -10,7 +10,7 @@ const plans = [
     period: '7 dní',
     description: 'Skúsite si platformu bez záväzkov.',
     cta: 'Začať skúšobné obdobie',
-    href: '/signup',
+    href: '/register',
     highlighted: false,
     features: [
       '3 analýzy modelov',
@@ -26,7 +26,7 @@ const plans = [
     period: 'mesačne',
     description: 'Pre solo dealerov a malé bazáre.',
     cta: 'Zvoliť Plus',
-    href: '/signup?plan=plus',
+    href: '/register?plan=plus',
     highlighted: true,
     features: [
       'Neobmedzené analýzy a porovnania',
@@ -43,7 +43,7 @@ const plans = [
     period: 'mesačne',
     description: 'Pre tímy a väčšie autobazáre.',
     cta: 'Zvoliť Premium',
-    href: '/signup?plan=premium',
+    href: '/register?plan=premium',
     highlighted: false,
     features: [
       'Všetko z Plus',
