@@ -21,6 +21,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <nav className="hidden items-center gap-6 md:flex">
             {[
               { href: '/app/overview', label: 'Prehľad' },
+              { href: '/app/trends', label: 'Trendy' },
+              { href: '/app/deals', label: 'Deals' },
               { href: '/app/market', label: 'Trh' },
               { href: '/app/listings', label: 'Inzeráty' },
               { href: '/app/garage', label: 'Garáž' },

@@ -14,6 +14,7 @@ import {
   vehicleMakes,
   vehicleModels,
 } from '@/lib/db/schema';
+import { computeFingerprint } from '@/lib/dedup/fingerprint';
 import type { NormalizedDetail, NormalizedListing, ScrapeResult, Source } from './types';
 
 export type UpsertCounts = {
@@ -145,6 +146,18 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
     rows.map(async (r) => {
       if (!r.sourceId || !r.url) return null;
       const modelId = await ensureModelId(r.makeSlug, r.modelSlug, r.rawTitle);
+      // Compute a weak fingerprint at upsert time using only listing-page
+      // fields. After detail enrichment runs, backfillFingerprints() will
+      // recompute with sellerName + first photo URL for stronger matching.
+      const fingerprint = computeFingerprint({
+        makeSlug: r.makeSlug,
+        modelSlug: r.modelSlug,
+        year: r.year,
+        mileageKm: r.mileageKm,
+        region: r.region,
+        sellerName: null,
+        firstPhotoUrl: null,
+      });
       return {
         source: r.source,
         sourceId: r.sourceId,
@@ -157,6 +170,7 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
         region: r.region,
         url: r.url,
         rawJson: r.rawPayload,
+        fingerprint,
       };
     }),
   );
@@ -195,6 +209,9 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
             url: sql`excluded.url`,
             rawJson: sql`excluded.raw_json`,
             lastSeenAt: sql`now()`,
+            // Don't clobber a stronger fingerprint (computed post-enrichment)
+            // with the weaker upsert-time one. Only set it when NULL.
+            fingerprint: sql`coalesce(${listings.fingerprint}, excluded.fingerprint)`,
           },
         })
         .returning({ inserted: sql<boolean>`(xmax = 0)` });

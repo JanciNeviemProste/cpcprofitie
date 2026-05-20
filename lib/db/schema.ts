@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  bigint,
   bigserial,
   boolean,
   index,
@@ -14,6 +15,7 @@ import {
   uniqueIndex,
   uuid,
   varchar,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 
 export const planEnum = pgEnum('plan', ['free', 'plus', 'premium']);
@@ -103,6 +105,7 @@ export const vehicleModels = pgTable(
 );
 
 export const sellerTypeEnum = pgEnum('seller_type', ['private', 'dealer']);
+export const confidenceEnum = pgEnum('confidence', ['low', 'medium', 'high']);
 
 export const listings = pgTable(
   'listings',
@@ -122,11 +125,19 @@ export const listings = pgTable(
     firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull().defaultNow(),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
     soldAt: timestamp('sold_at', { withTimezone: true }),
+    removedAt: timestamp('removed_at', { withTimezone: true }),
+    fingerprint: varchar('fingerprint', { length: 64 }),
+    canonicalListingId: bigint('canonical_listing_id', { mode: 'bigint' }).references(
+      (): AnyPgColumn => listings.id,
+      { onDelete: 'set null' },
+    ),
   },
   (t) => [
     uniqueIndex('listings_source_source_id_idx').on(t.source, t.sourceId),
     index('listings_model_id_first_seen_idx').on(t.modelId, t.firstSeenAt),
     index('listings_region_idx').on(t.region),
+    index('listings_fingerprint_idx').on(t.fingerprint),
+    index('listings_canonical_idx').on(t.canonicalListingId),
   ],
 );
 
@@ -174,6 +185,8 @@ export const listingPhotos = pgTable(
   ],
 );
 
+// Year bucket: '2020+', '2015-19', '2010-14', '<2010', 'unknown'
+// Mileage bucket: '0-50k', '50-100k', '100-150k', '150k+', 'unknown'
 export const marketSnapshots = pgTable(
   'market_snapshots',
   {
@@ -181,6 +194,8 @@ export const marketSnapshots = pgTable(
       .notNull()
       .references(() => vehicleModels.id, { onDelete: 'cascade' }),
     region: varchar('region', { length: 64 }).notNull(),
+    yearBucket: varchar('year_bucket', { length: 8 }).notNull(),
+    mileageBucket: varchar('mileage_bucket', { length: 16 }).notNull(),
     period: varchar('period', { length: 8 }).notNull(),
     capturedOn: timestamp('captured_on', { withTimezone: true }).notNull(),
     avgPriceEur: numeric('avg_price_eur', { precision: 10, scale: 2 }),
@@ -193,8 +208,33 @@ export const marketSnapshots = pgTable(
     computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    primaryKey({ columns: [t.modelId, t.region, t.period, t.capturedOn] }),
+    primaryKey({
+      columns: [t.modelId, t.region, t.yearBucket, t.mileageBucket, t.period, t.capturedOn],
+    }),
     index('market_snapshots_model_period_idx').on(t.modelId, t.period, t.capturedOn),
+  ],
+);
+
+// One row per active canonical listing where price is below market median.
+// Recomputed weekly by the maintenance cron; older rows are deleted on each run.
+export const flipOpportunities = pgTable(
+  'flip_opportunities',
+  {
+    listingId: bigint('listing_id', { mode: 'bigint' })
+      .primaryKey()
+      .references(() => listings.id, { onDelete: 'cascade' }),
+    marketMedianEur: numeric('market_median_eur', { precision: 10, scale: 2 }).notNull(),
+    marketP25Eur: numeric('market_p25_eur', { precision: 10, scale: 2 }).notNull(),
+    discountPct: numeric('discount_pct', { precision: 5, scale: 2 }).notNull(),
+    potentialGainEur: numeric('potential_gain_eur', { precision: 10, scale: 2 }).notNull(),
+    cohortSize: integer('cohort_size').notNull(),
+    confidence: confidenceEnum('confidence').notNull(),
+    computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('flip_opportunities_discount_idx').on(t.discountPct),
+    index('flip_opportunities_gain_idx').on(t.potentialGainEur),
+    index('flip_opportunities_confidence_idx').on(t.confidence),
   ],
 );
 
@@ -290,7 +330,11 @@ export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Subscription = typeof subscriptions.$inferSelect;
 export type Listing = typeof listings.$inferSelect;
+export type NewListing = typeof listings.$inferInsert;
 export type MarketSnapshot = typeof marketSnapshots.$inferSelect;
+export type NewMarketSnapshot = typeof marketSnapshots.$inferInsert;
+export type FlipOpportunity = typeof flipOpportunities.$inferSelect;
+export type NewFlipOpportunity = typeof flipOpportunities.$inferInsert;
 export type GarageEntry = typeof garage.$inferSelect;
 export type WatchlistEntry = typeof watchlist.$inferSelect;
 export type AiListing = typeof aiListings.$inferSelect;
