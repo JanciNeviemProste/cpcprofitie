@@ -1,8 +1,9 @@
 import Link from 'next/link';
-import { formatEur, formatNumber, formatPct } from '@/components/app/kpi-card';
-import { findModel, mockMarketKpi, mockModels } from '@/lib/mock';
+import { formatEur, formatNumber } from '@/components/app/kpi-card';
+import { getModelKpi, getTrendingModels } from '@/lib/db/queries/dashboard';
 
 export const metadata = { title: 'Porovnanie' };
+export const dynamic = 'force-dynamic';
 
 type Search = { left?: string; right?: string };
 
@@ -12,19 +13,15 @@ export default async function ComparePage({
   searchParams: Promise<Search>;
 }) {
   const sp = await searchParams;
-  const leftSlug = sp.left ?? 'skoda-octavia';
-  const rightSlug = sp.right ?? 'volkswagen-passat';
-  const left = findModel(leftSlug) ?? findModel('skoda-octavia')!;
-  const right = findModel(rightSlug) ?? findModel('volkswagen-passat')!;
-  const kpiL = mockMarketKpi(left.slug);
-  const kpiR = mockMarketKpi(right.slug);
-
-  const winners: Record<string, 'L' | 'R'> = {
-    median: kpiL.median < kpiR.median ? 'L' : 'R',
-    days: kpiL.daysToSellAvg < kpiR.daysToSellAvg ? 'L' : 'R',
-    active: kpiL.countActive > kpiR.countActive ? 'L' : 'R',
-    growth: kpiL.weeklyChangePct > kpiR.weeklyChangePct ? 'L' : 'R',
-  };
+  const trending = await getTrendingModels(20);
+  const fallback1 = trending[0]?.modelSlug ?? '';
+  const fallback2 = trending[1]?.modelSlug ?? '';
+  const leftSlug = sp.left ?? fallback1;
+  const rightSlug = sp.right ?? fallback2;
+  const [left, right] = await Promise.all([
+    leftSlug ? getModelKpi(leftSlug) : null,
+    rightSlug ? getModelKpi(rightSlug) : null,
+  ]);
 
   return (
     <div className="container mx-auto px-4 py-10 sm:px-6 lg:px-8">
@@ -35,64 +32,81 @@ export default async function ComparePage({
         </p>
       </div>
 
-      <ModelPicker selected={left.slug} param="left" otherParam="right" otherSelected={right.slug} />
-
-      <div className="mt-10 grid gap-6 md:grid-cols-2">
-        <ModelColumn slug={left.slug} winners={winners} side="L" />
-        <ModelColumn slug={right.slug} winners={winners} side="R" />
-      </div>
+      {!left && !right ? (
+        <div className="mt-8 border-border/40 rounded-xl border p-12 text-center">
+          <p className="text-muted-foreground text-sm">
+            Zatiaľ žiadne klasifikované modely. Backfill model_id beží.
+          </p>
+        </div>
+      ) : (
+        <div className="mt-10 grid gap-6 md:grid-cols-2">
+          <ModelColumn kpi={left} side="L" otherKpi={right} />
+          <ModelColumn kpi={right} side="R" otherKpi={left} />
+        </div>
+      )}
     </div>
   );
 }
 
+import type { ModelKpi } from '@/lib/db/queries/dashboard';
+
 function ModelColumn({
-  slug,
-  winners,
+  kpi,
   side,
+  otherKpi,
 }: {
-  slug: string;
-  winners: Record<string, 'L' | 'R'>;
+  kpi: ModelKpi | null;
   side: 'L' | 'R';
+  otherKpi: ModelKpi | null;
 }) {
-  const model = findModel(slug)!;
-  const kpi = mockMarketKpi(slug);
-  const trend: 'up' | 'down' | 'flat' =
-    kpi.weeklyChangePct > 0.5 ? 'up' : kpi.weeklyChangePct < -0.5 ? 'down' : 'flat';
-  const isWinner = (key: keyof typeof winners) => winners[key] === side;
+  if (!kpi) {
+    return (
+      <div className="border-border/40 bg-card/30 rounded-xl border p-6">
+        <p className="text-muted-foreground text-sm">Model nenájdený. Zadajte iný slug v URL.</p>
+      </div>
+    );
+  }
+  const better = (a: number | null, b: number | null, lowerIsBetter: boolean) => {
+    if (a == null || b == null) return false;
+    return lowerIsBetter ? a < b : a > b;
+  };
+  const isWinner = {
+    median: better(kpi.median, otherKpi?.median ?? null, true),
+    count: better(kpi.countActive, otherKpi?.countActive ?? null, false),
+  };
 
   return (
     <div className="border-border/40 bg-card/30 rounded-xl border p-6">
-      <p className="text-muted-foreground text-xs uppercase tracking-wider">{model.make}</p>
-      <h2 className="text-2xl font-semibold tracking-tight">{model.name}</h2>
+      <h2 className="text-2xl font-semibold tracking-tight">{kpi.modelName}</h2>
       <div className="mt-6 grid gap-3">
         <Stat
-          label="Medián"
-          value={formatEur(kpi.median)}
-          highlight={isWinner('median')}
-          hint={isWinner('median') ? 'lacnejší' : undefined}
+          label="Medián ceny"
+          value={kpi.median != null ? formatEur(kpi.median) : '—'}
+          highlight={isWinner.median}
+          hint={isWinner.median ? 'lacnejší' : undefined}
         />
         <Stat
-          label="Doba predaja"
-          value={`${kpi.daysToSellAvg} dní`}
-          highlight={isWinner('days')}
-          hint={isWinner('days') ? 'rýchlejší obrat' : undefined}
+          label="P25 / P75"
+          value={
+            kpi.p25 != null && kpi.p75 != null
+              ? `${formatEur(kpi.p25)} – ${formatEur(kpi.p75)}`
+              : '—'
+          }
         />
         <Stat
           label="Aktívne inzeráty"
           value={formatNumber(kpi.countActive)}
-          highlight={isWinner('active')}
-          hint={isWinner('active') ? 'väčšia likvidita' : undefined}
+          highlight={isWinner.count}
+          hint={isWinner.count ? 'väčšia likvidita' : undefined}
         />
+        <Stat label="Priemerný rok" value={kpi.avgYear != null ? String(kpi.avgYear) : '—'} />
         <Stat
-          label="Týždenný trend"
-          value={formatPct(kpi.weeklyChangePct)}
-          highlight={isWinner('growth')}
-          hint={isWinner('growth') ? 'lepší momentum' : undefined}
-          tone={trend}
+          label="Priemerný počet km"
+          value={kpi.avgMileageKm != null ? `${formatNumber(kpi.avgMileageKm)} km` : '—'}
         />
       </div>
       <Link
-        href={`/app/analysis/${slug}`}
+        href={`/app/analysis/${kpi.slug}`}
         className="text-primary mt-6 inline-block text-sm hover:underline"
       >
         Detail modelu →
@@ -106,16 +120,12 @@ function Stat({
   value,
   hint,
   highlight,
-  tone,
 }: {
   label: string;
   value: string;
   hint?: string;
   highlight?: boolean;
-  tone?: 'up' | 'down' | 'flat';
 }) {
-  const valueColor =
-    tone === 'up' ? 'text-chart-3' : tone === 'down' ? 'text-destructive' : 'text-foreground';
   return (
     <div
       className={`flex items-center justify-between rounded-lg border px-4 py-3 ${
@@ -124,43 +134,9 @@ function Stat({
     >
       <span className="text-muted-foreground text-sm">{label}</span>
       <div className="text-right">
-        <p className={`text-base font-semibold tabular-nums ${valueColor}`}>{value}</p>
-        {hint && <p className="text-primary mt-0.5 text-xs">{hint}</p>}
+        <p className="text-base font-semibold tabular-nums">{value}</p>
+        {hint && <p className="text-primary text-xs">{hint}</p>}
       </div>
-    </div>
-  );
-}
-
-function ModelPicker({
-  selected,
-  param,
-  otherParam,
-  otherSelected,
-}: {
-  selected: string;
-  param: 'left' | 'right';
-  otherParam: 'left' | 'right';
-  otherSelected: string;
-}) {
-  return (
-    <div className="text-muted-foreground mt-6 flex flex-wrap items-center gap-2 text-xs">
-      <span>Vyber {param === 'left' ? 'ľavý' : 'pravý'}:</span>
-      {mockModels.slice(0, 6).map((m) => (
-        <Link
-          key={m.slug}
-          href={{
-            pathname: '/app/compare',
-            query: { [param]: m.slug, [otherParam]: otherSelected },
-          }}
-          className={
-            m.slug === selected
-              ? 'border-primary bg-primary/10 text-primary rounded-md border px-2 py-1'
-              : 'border-border/40 hover:bg-muted rounded-md border px-2 py-1'
-          }
-        >
-          {m.make} {m.name}
-        </Link>
-      ))}
     </div>
   );
 }
