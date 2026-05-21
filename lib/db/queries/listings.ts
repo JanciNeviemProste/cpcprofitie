@@ -33,6 +33,7 @@ export type ListingRow = {
   url: string;
   makeName: string | null;
   modelName: string | null;
+  rawTitle: string | null;
   priceEur: number | null;
   year: number | null;
   mileageKm: number | null;
@@ -129,6 +130,7 @@ export async function getListings(
       url: listings.url,
       makeName: vehicleMakes.name,
       modelName: vehicleModels.name,
+      rawTitle: listings.rawTitle,
       priceEur: listings.priceEur,
       year: listings.year,
       mileageKm: listings.mileageKm,
@@ -163,6 +165,7 @@ export async function getListings(
       url: r.url,
       makeName: r.makeName ?? null,
       modelName: r.modelName ?? null,
+      rawTitle: r.rawTitle ?? null,
       priceEur: r.priceEur != null ? Number(r.priceEur) : null,
       year: r.year,
       mileageKm: r.mileageKm,
@@ -187,6 +190,7 @@ export async function getListingById(
       url: listings.url,
       makeName: vehicleMakes.name,
       modelName: vehicleModels.name,
+      rawTitle: listings.rawTitle,
       priceEur: listings.priceEur,
       year: listings.year,
       mileageKm: listings.mileageKm,
@@ -227,6 +231,7 @@ export async function getListingById(
     url: base.url,
     makeName: base.makeName ?? null,
     modelName: base.modelName ?? null,
+    rawTitle: base.rawTitle ?? null,
     priceEur: base.priceEur != null ? Number(base.priceEur) : null,
     year: base.year,
     mileageKm: base.mileageKm,

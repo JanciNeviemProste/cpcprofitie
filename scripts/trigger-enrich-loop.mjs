@@ -19,14 +19,18 @@ if (!m) {
 const secret = m[1].replace(/^["']|["']$/g, '');
 
 const ENDPOINT = 'https://cpcprofitie.vercel.app/api/cron/enrich-source';
+const FETCH_TIMEOUT_MS = 280_000;
 const startedAt = Date.now();
 let runningTotal = 0;
 let invocation = 0;
+let consecutiveErrors = 0;
 
 async function callOnce() {
   invocation++;
   const ts = new Date().toISOString().slice(11, 19);
   const start = Date.now();
+  const ac = new AbortController();
+  const abortTimer = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
   try {
     const res = await fetch(ENDPOINT, {
       method: 'POST',
@@ -35,6 +39,7 @@ async function callOnce() {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ source }),
+      signal: ac.signal,
     });
     const text = await res.text();
     const ms = Date.now() - start;
@@ -50,6 +55,7 @@ async function callOnce() {
       return { done: false, fatal: parsed.error === 'unauthorized' };
     }
     runningTotal += parsed.totalDetails ?? 0;
+    consecutiveErrors = 0;
     const totalSecs = ((Date.now() - startedAt) / 1000).toFixed(0);
     console.log(
       `[${source}][${ts}] inv ${invocation}: ${parsed.totalFetched}/${parsed.batches * 10} fetched, ${parsed.totalDetails} details, ${parsed.totalErrors} errors, ${(ms / 1000).toFixed(0)}s. ` +
@@ -57,8 +63,11 @@ async function callOnce() {
     );
     return { done: parsed.done === true, fatal: false };
   } catch (e) {
-    console.log(`[${source}][${ts}] inv ${invocation}: FETCH ERROR ${e.message}`);
-    return { done: false, fatal: false };
+    consecutiveErrors++;
+    console.log(`[${source}][${ts}] inv ${invocation}: FETCH ERROR ${e.message} (consec=${consecutiveErrors})`);
+    return { done: false, fatal: consecutiveErrors >= 10 };
+  } finally {
+    clearTimeout(abortTimer);
   }
 }
 
@@ -69,9 +78,14 @@ while (true) {
     break;
   }
   if (result.fatal) {
-    console.log(`[${source}] FATAL — aborting`);
+    console.log(`[${source}] FATAL — ${consecutiveErrors} consecutive errors, aborting`);
     process.exit(1);
   }
-  // brief breath between calls
-  await new Promise((r) => setTimeout(r, 3000));
+  // Exponential backoff on consecutive errors: 3s → 10s → 30s → 60s → 60s ...
+  const breath =
+    consecutiveErrors === 0 ? 3000
+    : consecutiveErrors === 1 ? 10_000
+    : consecutiveErrors === 2 ? 30_000
+    : 60_000;
+  await new Promise((r) => setTimeout(r, breath));
 }

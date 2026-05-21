@@ -73,6 +73,7 @@ async function callOnce(startPage) {
   }
 }
 
+let consecutiveEmpty = 0;
 for (let startPage = 1; startPage <= maxStartPage; startPage += PAGES_PER_RUN) {
   const r = await callOnce(startPage);
   if (r.fatal) {
@@ -80,8 +81,14 @@ for (let startPage = 1; startPage <= maxStartPage; startPage += PAGES_PER_RUN) {
     process.exit(1);
   }
   if (r.listingsFound === 0) {
-    console.log(`[${source}] EMPTY page reached at startPage=${startPage}, stopping early`);
-    break;
+    consecutiveEmpty++;
+    if (consecutiveEmpty >= 2) {
+      console.log(`[${source}] 2 consecutive EMPTY pages, stopping at startPage=${startPage}`);
+      break;
+    }
+    console.log(`[${source}] empty page at startPage=${startPage}, need 1 more before stop`);
+  } else {
+    consecutiveEmpty = 0;
   }
   const breath = consecutiveErrors === 0 ? 2000 : consecutiveErrors === 1 ? 10_000 : 30_000;
   await new Promise((r) => setTimeout(r, breath));

@@ -92,7 +92,8 @@ export async function runEnrichment(
         errors.push(`${listing.sourceId}: HTTP ${res.status}`);
         // Insert a tombstone for permanently-gone listings so loadUnenrichedBatch
         // doesn't re-pick them every run. 404/410 = removed/sold by the source.
-        if (res.status === 404 || res.status === 410) {
+        // 403 = source blocks us (e.g. Cloudflare), also permanent for our crawler.
+        if (res.status === 404 || res.status === 410 || res.status === 403) {
           details.push({
             source: source.id,
             sourceId: listing.sourceId,

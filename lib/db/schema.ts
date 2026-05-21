@@ -120,6 +120,7 @@ export const listings = pgTable(
     fuel: fuelEnum('fuel'),
     transmission: transmissionEnum('transmission'),
     region: varchar('region', { length: 64 }),
+    rawTitle: text('raw_title'),
     url: text('url').notNull(),
     rawJson: jsonb('raw_json'),
     firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull().defaultNow(),

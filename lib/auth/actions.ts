@@ -24,8 +24,7 @@ function translate(message: string): string {
   if (m.includes('password should be at least')) return 'Heslo musí mať aspoň 6 znakov.';
   if (m.includes('rate limit')) return 'Príliš veľa pokusov. Skúste o chvíľu znova.';
   if (m.includes('email')) return 'Neplatný e-mail.';
-  // TEMP debug: echo raw message everywhere until login is stable. Revert when done.
-  return `Chyba: ${message}`;
+  return 'Niečo sa pokazilo. Skúste to znova.';
 }
 
 async function getSupabaseOr503() {

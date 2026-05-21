@@ -4,6 +4,7 @@
 // crash.
 
 import { and, eq, sql } from 'drizzle-orm';
+import * as Sentry from '@sentry/nextjs';
 import { getDb } from '@/lib/db';
 import { hasDatabaseUrl } from '@/lib/db/url';
 import {
@@ -168,6 +169,7 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
         fuel: r.fuel,
         transmission: r.transmission,
         region: r.region,
+        rawTitle: r.rawTitle,
         url: r.url,
         rawJson: r.rawPayload,
         fingerprint,
@@ -206,6 +208,9 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
             transmission: sql`excluded.transmission`,
             region: sql`excluded.region`,
             modelId: sql`excluded.model_id`,
+            // Coalesce so a rescrape that fails to parse a title doesn't wipe
+            // a previously good one. New non-null titles still win on update.
+            rawTitle: sql`coalesce(excluded.raw_title, ${listings.rawTitle})`,
             url: sql`excluded.url`,
             rawJson: sql`excluded.raw_json`,
             lastSeenAt: sql`now()`,
@@ -252,6 +257,12 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
         firstRow: JSON.stringify(chunk[0]),
         error: errMsg,
         stack: e instanceof Error ? e.stack?.slice(0, 500) : undefined,
+      });
+      // Surface DB-level failures (schema drift, FK violation, etc.) to Sentry.
+      // Without this they hide as "skipped" counts and never alert.
+      Sentry.captureException(e, {
+        tags: { component: 'persist', step: 'upsertListings' },
+        extra: { chunkSize: chunk.length, firstSource: chunk[0]?.source },
       });
       skipped += chunk.length;
       lastError = errMsg;

@@ -33,6 +33,7 @@ function sourceBadge(source: string): string {
 }
 
 function title(row: ListingRow): string {
+  if (row.rawTitle) return row.rawTitle;
   if (row.makeName && row.modelName) return `${row.makeName} ${row.modelName}`;
   if (row.makeName) return row.makeName;
   return `Inzerát #${row.sourceId}`;

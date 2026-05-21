@@ -43,11 +43,7 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // TEMP demo unlock: /app/listings is publicly accessible while Supabase
-  // GoTrue auth backend is broken. Revert once auth is restored.
-  const isPublicDemo = request.nextUrl.pathname.startsWith('/app/listings');
-
-  if (isAppRoute && !user && !isPublicDemo) {
+  if (isAppRoute && !user) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     // Preserve the destination, but only the path portion — never the host.

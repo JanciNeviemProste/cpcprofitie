@@ -1,0 +1,7 @@
+{
+  "crons": [
+    { "path": "/api/cron/dispatch-scrape", "schedule": "0 */6 * * *" },
+    { "path": "/api/cron/weekly-maintenance", "schedule": "0 2 * * 0" },
+    { "path": "/api/cron/check-removed", "schedule": "0 3 * * *" }
+  ]
+}

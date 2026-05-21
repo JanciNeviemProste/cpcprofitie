@@ -33,6 +33,7 @@ function formatFuel(fuel: string | null): string {
 }
 
 function title(d: ListingDetailFull): string {
+  if (d.rawTitle) return d.rawTitle;
   if (d.makeName && d.modelName) return `${d.makeName} ${d.modelName}`;
   if (d.makeName) return d.makeName;
   return `Inzerát #${d.sourceId}`;
