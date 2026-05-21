@@ -90,6 +90,25 @@ export async function runEnrichment(
       fetched++;
       if (!res.ok) {
         errors.push(`${listing.sourceId}: HTTP ${res.status}`);
+        // Insert a tombstone for permanently-gone listings so loadUnenrichedBatch
+        // doesn't re-pick them every run. 404/410 = removed/sold by the source.
+        if (res.status === 404 || res.status === 410) {
+          details.push({
+            source: source.id,
+            sourceId: listing.sourceId,
+            photos: [],
+            description: '[GONE]',
+            vin: null,
+            bodyType: null,
+            colorExterior: null,
+            colorInterior: null,
+            powerKw: null,
+            engineCcm: null,
+            sellerType: null,
+            sellerName: null,
+            equipment: [],
+          });
+        }
         continue;
       }
       const html = await res.text();
