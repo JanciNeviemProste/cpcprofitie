@@ -3,9 +3,25 @@ import { type NextRequest, NextResponse } from 'next/server';
 
 const PROD = process.env.VERCEL_ENV === 'production';
 
+// Market-info pages — viewable without login. They show aggregated public
+// scraping data, no user-specific records. /app/garage, /app/watchlist,
+// /app/profile, /app/billing, /app/admin/* stay auth-gated.
+const PUBLIC_APP_PREFIXES = [
+  '/app/listings',
+  '/app/overview',
+  '/app/market',
+  '/app/compare',
+  '/app/analysis',
+  '/app/trends',
+  '/app/deals',
+];
+
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
-  const isAppRoute = request.nextUrl.pathname.startsWith('/app');
+  const path = request.nextUrl.pathname;
+  const isAppRoute = path.startsWith('/app');
+  const isPublicAppRoute =
+    isAppRoute && PUBLIC_APP_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -43,7 +59,7 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (isAppRoute && !user) {
+  if (isAppRoute && !user && !isPublicAppRoute) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     // Preserve the destination, but only the path portion — never the host.

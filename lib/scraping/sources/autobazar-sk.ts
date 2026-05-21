@@ -20,7 +20,26 @@ const BASE = 'https://www.autobazar.sk';
 // Listings can appear as relative (/27891055/audi-sq7/) or absolute
 // (https://www.autobazar.sk/27891055/audi-sq7/) — accept both.
 const LISTING_URL_RE =
-  /^(?:https?:\/\/(?:www\.)?autobazar\.sk)?\/(\d{6,})\/[\w-]+\/?$/;
+  /^(?:https?:\/\/(?:www\.)?autobazar\.sk)?\/(\d{6,})\/([\w-]+)\/?$/;
+
+// "audi-a4-avant-40-2-0-tdi-quattro-s-tronic-140kw-190hp-a7"
+// → "Audi A4 Avant 40 2 0 TDI Quattro S Tronic 140kw 190hp A7"
+// We capitalize the first letter of each token and uppercase short alpha
+// abbreviations (TDI, KW, HP, AT etc.) to look like real titles.
+function slugToTitle(slug: string): string {
+  return slug
+    .split('-')
+    .filter(Boolean)
+    .map((part) => {
+      // pure digits → leave as-is
+      if (/^\d+$/.test(part)) return part;
+      // short all-letters tokens (2-4 chars) — uppercase common car abbreviations
+      const upper = part.toUpperCase();
+      if (part.length <= 4 && /^[a-z]+$/.test(part)) return upper;
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(' ');
+}
 
 export function parseListingsPage(html: string): NormalizedListing[] {
   const $ = cheerio.load(html);
@@ -55,7 +74,10 @@ export function parseListingsPage(html: string): NormalizedListing[] {
     const titleFromAttr = ($anchor.attr('title') ?? '').trim();
     const titleFromText = ($anchor.text() ?? '').trim();
     const titleFromImg = $card.find('img[alt]').first().attr('alt')?.trim() ?? '';
-    const title = titleFromAttr || titleFromText || titleFromImg || null;
+    // Last resort: decode the URL slug — every listing has it, so this guarantees
+    // we get *some* title even on cards without thumbnails / alt text.
+    const titleFromSlug = match[2] ? slugToTitle(match[2]) : '';
+    const title = titleFromAttr || titleFromText || titleFromImg || titleFromSlug || null;
     const cardText = $card.text();
 
     const { makeSlug, modelSlug } = parseMakeModel(title);
