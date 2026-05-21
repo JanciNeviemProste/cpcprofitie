@@ -55,6 +55,7 @@ export async function POST(request: Request) {
   let totalErrors = 0;
   let batches = 0;
   let done = false;
+  const sampleErrors: string[] = [];
 
   while (Date.now() < deadline) {
     let batch;
@@ -83,6 +84,9 @@ export async function POST(request: Request) {
       totalFetched += result.fetched;
       totalDetails += result.details.length;
       totalErrors += result.errors.length;
+      for (const e of result.errors) {
+        if (sampleErrors.length < 5) sampleErrors.push(e);
+      }
     } catch (e) {
       totalErrors++;
       Sentry.captureException(e, {
@@ -99,6 +103,7 @@ export async function POST(request: Request) {
     totalFetched,
     totalDetails,
     totalErrors,
+    sampleErrors,
     elapsedMs: Date.now() - startedAt,
   });
 }
