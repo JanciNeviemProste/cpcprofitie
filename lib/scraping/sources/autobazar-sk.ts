@@ -49,7 +49,13 @@ export function parseListingsPage(html: string): NormalizedListing[] {
       $anchor.closest('article, li, tr, section').length > 0
         ? $anchor.closest('article, li, tr, section')
         : $anchor.parent();
-    const title = ($anchor.attr('title') ?? $anchor.text() ?? '').trim() || null;
+    // Autobazar.sk doesn't put titles on anchors or in anchor text — they live
+    // in `<img alt="Mercedes-Benz EQA 350 4Matic, 08-2024, …">` inside the card.
+    // Fall back through: anchor title → anchor text → first non-empty img alt.
+    const titleFromAttr = ($anchor.attr('title') ?? '').trim();
+    const titleFromText = ($anchor.text() ?? '').trim();
+    const titleFromImg = $card.find('img[alt]').first().attr('alt')?.trim() ?? '';
+    const title = titleFromAttr || titleFromText || titleFromImg || null;
     const cardText = $card.text();
 
     const { makeSlug, modelSlug } = parseMakeModel(title);
