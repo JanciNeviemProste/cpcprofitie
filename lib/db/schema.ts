@@ -3,6 +3,7 @@ import {
   bigint,
   bigserial,
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -132,6 +133,9 @@ export const listings = pgTable(
       (): AnyPgColumn => listings.id,
       { onDelete: 'set null' },
     ),
+    viewCount: integer('view_count'),
+    isFeatured: boolean('is_featured').notNull().default(false),
+    sellerPhone: varchar('seller_phone', { length: 32 }),
   },
   (t) => [
     uniqueIndex('listings_source_source_id_idx').on(t.source, t.sourceId),
@@ -139,6 +143,7 @@ export const listings = pgTable(
     index('listings_region_idx').on(t.region),
     index('listings_fingerprint_idx').on(t.fingerprint),
     index('listings_canonical_idx').on(t.canonicalListingId),
+    index('listings_view_count_idx').on(t.viewCount),
   ],
 );
 
@@ -327,6 +332,21 @@ export const scrapeRuns = pgTable(
   (t) => [index('scrape_runs_source_started_idx').on(t.source, t.startedAt)],
 );
 
+export const listingPriceHistory = pgTable(
+  'listing_price_history',
+  {
+    listingId: bigint('listing_id', { mode: 'bigint' })
+      .notNull()
+      .references(() => listings.id, { onDelete: 'cascade' }),
+    recordedOn: date('recorded_on').notNull(),
+    priceEur: numeric('price_eur', { precision: 10, scale: 2 }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.listingId, t.recordedOn] }),
+    index('listing_price_history_recorded_on_idx').on(t.recordedOn),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Subscription = typeof subscriptions.$inferSelect;
@@ -339,3 +359,4 @@ export type NewFlipOpportunity = typeof flipOpportunities.$inferInsert;
 export type GarageEntry = typeof garage.$inferSelect;
 export type WatchlistEntry = typeof watchlist.$inferSelect;
 export type AiListing = typeof aiListings.$inferSelect;
+export type PriceHistoryRow = typeof listingPriceHistory.$inferSelect;

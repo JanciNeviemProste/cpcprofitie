@@ -77,6 +77,14 @@ export function parseListingsPage(html: string): NormalizedListing[] {
     const fuel = parseFuel(extractFuelHintFromText(popisText));
     const transmission = parseTransmission(extractTransmissionHintFromText(popisText));
 
+    // Engagement signals: view count, PRO/featured flag, seller phone.
+    // All best-effort — return undefined if the selector/regex misses so
+    // persist coalesces don't clobber an existing value.
+    const blockText = $block.text();
+    const viewCount = parseBazosViewCount($, $block);
+    const isFeatured = parseBazosFeatured($, $block);
+    const sellerPhone = parsePhoneFromText(blockText);
+
     results.push({
       source: 'bazos.sk',
       sourceId,
@@ -93,6 +101,9 @@ export function parseListingsPage(html: string): NormalizedListing[] {
       rawPayload: thumbnailUrl
         ? { capturedAt: new Date().toISOString(), thumbnailUrl }
         : { capturedAt: new Date().toISOString() },
+      viewCount,
+      isFeatured,
+      sellerPhone,
     });
   });
 
@@ -140,6 +151,64 @@ function parseBazosKm(popis: string | null): number | null {
   const n = Number(m[1]!.replace(/\s/g, ''));
   if (!Number.isFinite(n) || n <= 0 || n >= 2_000_000) return null;
   return n;
+}
+
+// Bazoš shows view counts like "12×" in a span.velikost10. Multiple
+// velikost10 spans exist per card (post-date is also one); pick the one
+// whose text matches the "N×" / "N krát" pattern.
+function parseBazosViewCount(
+  $: cheerio.CheerioAPI,
+  $block: cheerio.Cheerio<any>,
+): number | undefined {
+  const candidates = $block
+    .filter('span.velikost10, span.velikost11')
+    .add($block.find('span.velikost10, span.velikost11'));
+  let best: number | undefined;
+  candidates.each((_, el) => {
+    const t = $(el).text().trim();
+    const m = /(\d[\d\s]*)\s*[×x]/i.exec(t) || /(\d[\d\s]*)\s*krát/i.exec(t);
+    if (!m) return;
+    const n = Number(m[1]!.replace(/\s/g, ''));
+    if (Number.isFinite(n) && n >= 0 && n < 10_000_000) {
+      best = n;
+      return false;
+    }
+  });
+  return best;
+}
+
+// PRO/TOP markers on bazos.sk are rendered as <b class="bazoslogo">PRO</b>
+// or a span carrying TOP / PRO text. We search the block scope only.
+function parseBazosFeatured(
+  $: cheerio.CheerioAPI,
+  $block: cheerio.Cheerio<any>,
+): boolean | undefined {
+  const logos = $block
+    .filter('b.bazoslogo, span.bazoslogo, b.toplogo, span.toplogo')
+    .add($block.find('b.bazoslogo, span.bazoslogo, b.toplogo, span.toplogo'));
+  if (logos.length === 0) return undefined;
+  let found = false;
+  logos.each((_, el) => {
+    const t = $(el).text().trim().toUpperCase();
+    if (t === 'PRO' || t === 'TOP' || t.startsWith('PRO ') || t.startsWith('TOP ')) {
+      found = true;
+      return false;
+    }
+  });
+  return found || undefined;
+}
+
+// SK phone-ish numbers: local "0901 234 567", "0901 234567", or "+421 901 234 567".
+// Conservative regex — refuses to pick up bare 9-digit numbers (would catch
+// post IDs etc.).
+const PHONE_RE =
+  /(?:\+421\s?\d{3}\s?\d{3}\s?\d{3}|\b0\d{2,3}\s?\d{3}\s?\d{3,4}\b)/;
+
+function parsePhoneFromText(text: string | null | undefined): string | undefined {
+  if (!text) return undefined;
+  const m = PHONE_RE.exec(text);
+  if (!m) return undefined;
+  return m[0].replace(/\s+/g, ' ').trim().slice(0, 32);
 }
 
 export const bazosSk: ScraperSource = {

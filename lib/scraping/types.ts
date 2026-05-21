@@ -39,6 +39,9 @@ export type NormalizedListing = {
   region: string | null;
   rawTitle: string | null;
   rawPayload: Record<string, unknown>;
+  viewCount?: number | null;
+  isFeatured?: boolean;
+  sellerPhone?: string | null;
 };
 
 export type ScrapeResult = {

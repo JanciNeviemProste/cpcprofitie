@@ -1,7 +1,9 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { PhotoGallery } from '@/components/app/listings/photo-gallery';
+import { PriceHistoryChart } from '@/components/app/listings/price-history-chart';
 import { getListingById, type ListingDetailFull } from '@/lib/db/queries/listings';
+import { getPriceHistory } from '@/lib/db/queries/price-history';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,6 +55,7 @@ export default async function ListingDetailPage({
   }
   const detail = await getListingById(id);
   if (!detail) notFound();
+  const priceHistory = await getPriceHistory(id);
 
   return (
     <div className="container mx-auto px-4 py-6 sm:px-6 lg:px-8">
@@ -142,6 +145,10 @@ export default async function ListingDetailPage({
           </dl>
         </div>
       </div>
+
+      <section className="mt-8">
+        <PriceHistoryChart data={priceHistory} />
+      </section>
 
       {detail.description && (
         <section className="mt-8">

@@ -88,6 +88,18 @@ export function parseListingsPage(html: string): NormalizedListing[] {
     const transmission = parseTransmission(extractTransmissionHintFromText(cardText));
     const region = prefixRegion(extractRegionHint(cardText), 'SK');
 
+    // Engagement signals (best-effort: list page rarely exposes these; detail
+    // enrichment fills in the rest). isFeatured fires on the VIP/TOP card
+    // class autobazar.sk applies to paid promotions.
+    const isFeatured =
+      $card.is('.ab-card-vip, .vip, .top, [class*="vip" i], [class*="top-promo" i]') ||
+      $card.find('.ab-card-vip, .vip-badge, [class*="vip" i]').length > 0 ||
+      /\bVIP\b/.test(cardText)
+        ? true
+        : undefined;
+    const viewCount = parseAbSkViewCount($, $card);
+    const sellerPhone = parseAbSkPhone(cardText);
+
     results.push({
       source: 'autobazar.sk',
       sourceId,
@@ -102,6 +114,9 @@ export function parseListingsPage(html: string): NormalizedListing[] {
       region,
       rawTitle: title,
       rawPayload: { capturedAt: new Date().toISOString() },
+      viewCount,
+      isFeatured,
+      sellerPhone,
     });
   });
 
@@ -174,6 +189,43 @@ const SK_REGIONS = [
   'Prešovský',
   'Košický',
 ];
+
+// View counter is occasionally rendered as "Zobrazení: 123" or in an element
+// with view-related class. Best-effort — undefined if nothing matches.
+function parseAbSkViewCount(
+  $: cheerio.CheerioAPI,
+  $card: cheerio.Cheerio<any>,
+): number | undefined {
+  const candidates = $card.find('[class*="view" i], [class*="zobrazen" i]');
+  let result: number | undefined;
+  candidates.each((_, el) => {
+    const t = $(el).text().trim();
+    const m = /(\d[\d\s]{0,8})/.exec(t);
+    if (!m) return;
+    const n = Number(m[1]!.replace(/\s/g, ''));
+    if (Number.isFinite(n) && n >= 0 && n < 10_000_000) {
+      result = n;
+      return false;
+    }
+  });
+  if (result !== undefined) return result;
+  const txtMatch = /(?:zobrazen[íi]|views?)[\s:]+(\d[\d\s]{0,8})/i.exec($card.text());
+  if (txtMatch) {
+    const n = Number(txtMatch[1]!.replace(/\s/g, ''));
+    if (Number.isFinite(n) && n >= 0 && n < 10_000_000) return n;
+  }
+  return undefined;
+}
+
+const AB_SK_PHONE_RE =
+  /(?:\+421\s?\d{3}\s?\d{3}\s?\d{3}|\b0\d{2,3}\s?\d{3}\s?\d{3,4}\b)/;
+
+function parseAbSkPhone(text: string | null | undefined): string | undefined {
+  if (!text) return undefined;
+  const m = AB_SK_PHONE_RE.exec(text);
+  if (!m) return undefined;
+  return m[0].replace(/\s+/g, ' ').trim().slice(0, 32);
+}
 
 function extractRegionHint(text: string): string | null {
   for (const r of SK_REGIONS) {

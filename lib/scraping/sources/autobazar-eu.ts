@@ -37,6 +37,12 @@ type RawListing = {
   location?: { name?: string | null } | null;
   bodyworkValue?: string | null;
   vin?: string | null;
+  views?: number | null;
+  viewCount?: number | null;
+  isPremium?: boolean | null;
+  isPromoted?: boolean | null;
+  premium?: boolean | null;
+  user?: { phone?: string | null; phoneNumber?: string | null } | null;
 };
 
 function pickListings(parsed: unknown): RawListing[] {
@@ -93,6 +99,21 @@ export function parseListingsPage(html: string): NormalizedListing[] {
     const regionRaw = r.location?.name ?? null;
     const region = prefixRegion(regionRaw, 'SK');
 
+    const viewsRaw = r.views ?? r.viewCount ?? null;
+    const viewCount =
+      typeof viewsRaw === 'number' && Number.isFinite(viewsRaw) && viewsRaw >= 0
+        ? viewsRaw
+        : null;
+    const isFeatured =
+      r.isPremium === true || r.premium === true || r.isPromoted === true
+        ? true
+        : undefined;
+    const phoneRaw = r.user?.phone ?? r.user?.phoneNumber ?? null;
+    const sellerPhone =
+      typeof phoneRaw === 'string' && phoneRaw.trim().length > 0
+        ? phoneRaw.trim().slice(0, 32)
+        : null;
+
     results.push({
       source: 'autobazar.eu',
       sourceId,
@@ -107,6 +128,9 @@ export function parseListingsPage(html: string): NormalizedListing[] {
       region,
       rawTitle: title,
       rawPayload: { capturedAt: new Date().toISOString() },
+      viewCount,
+      isFeatured,
+      sellerPhone,
     });
   }
 

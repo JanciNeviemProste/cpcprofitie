@@ -181,6 +181,9 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
         url: r.url,
         rawJson: r.rawPayload,
         fingerprint,
+        viewCount: r.viewCount ?? null,
+        isFeatured: r.isFeatured === true,
+        sellerPhone: r.sellerPhone ?? null,
       };
     }),
   );
@@ -225,6 +228,11 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
             // Don't clobber a stronger fingerprint (computed post-enrichment)
             // with the weaker upsert-time one. Only set it when NULL.
             fingerprint: sql`coalesce(${listings.fingerprint}, excluded.fingerprint)`,
+            // Engagement signals: view_count uses fresh non-null (counters go up),
+            // is_featured is sticky-true (OR), seller_phone keeps first non-null.
+            viewCount: sql`coalesce(excluded.view_count, ${listings.viewCount})`,
+            isFeatured: sql`(${listings.isFeatured} OR excluded.is_featured)`,
+            sellerPhone: sql`coalesce(${listings.sellerPhone}, excluded.seller_phone)`,
           },
         })
         .returning({

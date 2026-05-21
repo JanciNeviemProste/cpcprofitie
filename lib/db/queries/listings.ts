@@ -41,6 +41,8 @@ export type ListingRow = {
   region: string | null;
   firstSeenAt: Date;
   heroPhotoUrl: string | null;
+  viewCount: number | null;
+  isFeatured: boolean;
 };
 
 export type ListingDetailFull = ListingRow & {
@@ -138,6 +140,8 @@ export async function getListings(
       region: listings.region,
       firstSeenAt: listings.firstSeenAt,
       heroPhotoUrl: heroPhoto.url,
+      viewCount: listings.viewCount,
+      isFeatured: listings.isFeatured,
     })
     .from(listings)
     .leftJoin(vehicleModels, eq(vehicleModels.id, listings.modelId))
@@ -173,6 +177,8 @@ export async function getListings(
       region: r.region,
       firstSeenAt: r.firstSeenAt,
       heroPhotoUrl: r.heroPhotoUrl,
+      viewCount: r.viewCount ?? null,
+      isFeatured: r.isFeatured ?? false,
     })),
     total: totalRows[0]?.n ?? 0,
   };
@@ -197,6 +203,8 @@ export async function getListingById(
       fuel: listings.fuel,
       region: listings.region,
       firstSeenAt: listings.firstSeenAt,
+      viewCount: listings.viewCount,
+      isFeatured: listings.isFeatured,
       description: listingDetails.description,
       vin: listingDetails.vin,
       bodyType: listingDetails.bodyType,
