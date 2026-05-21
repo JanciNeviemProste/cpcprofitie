@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/nextjs';
 import { eq } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { subscriptions, type Subscription } from '@/lib/db/schema';
@@ -16,6 +17,11 @@ export async function getUserSubscription(userId: string): Promise<Subscription 
     return rows[0] ?? null;
   } catch (e) {
     console.error('subscription_lookup_failed', e instanceof Error ? e.message : e);
+    // Silent downgrade would mean paying users see free-tier limits. Alert.
+    Sentry.captureException(e, {
+      tags: { component: 'billing', step: 'getUserSubscription' },
+      extra: { userId },
+    });
     return null;
   }
 }

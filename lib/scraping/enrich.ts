@@ -2,6 +2,7 @@
 // row, fetches the listing's detail URL and runs the source's
 // `parseDetailPage`. Sources without a `parseDetailPage` are skipped.
 
+import * as Sentry from '@sentry/nextjs';
 import { isAllowed, parseRobotsTxt, crawlDelayFor } from './robots';
 import { ScrapeForbiddenError, USER_AGENT, type ScraperSource } from './sources/source-interface';
 import type { NormalizedDetail, NormalizedListing } from './types';
@@ -38,7 +39,13 @@ async function fetchRobots(baseUrl: string, f: typeof fetch): Promise<string> {
     const body = res.ok ? await res.text() : '';
     robotsBodyCacheByHost.set(host, { fetchedAt: now, body });
     return body;
-  } catch {
+  } catch (e) {
+    // Permissive cache so a DNS hiccup doesn't disable crawling, but alert
+    // so we know robots.txt is effectively missing for this host.
+    Sentry.captureException(e, {
+      tags: { component: 'enrich', step: 'fetchRobots' },
+      extra: { host },
+    });
     robotsBodyCacheByHost.set(host, { fetchedAt: now, body: '' });
     return '';
   }

@@ -302,6 +302,11 @@ export async function recordScrapeRun(
     });
   } catch (e) {
     console.error('scrape_run_record_failed', e instanceof Error ? e.message : e);
+    // Lost audit trail without alerting blinds us to schema-drift-style bugs.
+    Sentry.captureException(e, {
+      tags: { component: 'persist', step: 'recordScrapeRun' },
+      extra: { source },
+    });
   }
 }
 
@@ -400,18 +405,20 @@ export async function persistDetails(
       detailsUpserted++;
 
       if (d.photos.length > 0) {
-        // Replace photos atomically: delete then insert. Cheaper than per-row
-        // upsert because position numbering changes when the seller re-orders.
-        await db.delete(listingPhotos).where(eq(listingPhotos.listingId, listingId));
+        // Replace photos atomically: delete + insert in one transaction so a
+        // mid-insert failure can't leave the listing photo-less.
         const photoRows = d.photos.slice(0, 100).map((url, i) => ({
           listingId,
           position: i + 1,
           url: url.slice(0, 2000),
         }));
-        if (photoRows.length > 0) {
-          await db.insert(listingPhotos).values(photoRows);
-          photosInserted += photoRows.length;
-        }
+        await db.transaction(async (tx) => {
+          await tx.delete(listingPhotos).where(eq(listingPhotos.listingId, listingId));
+          if (photoRows.length > 0) {
+            await tx.insert(listingPhotos).values(photoRows);
+          }
+        });
+        photosInserted += photoRows.length;
       }
 
       // Detail page typically has more accurate year/km/region/fuel than the

@@ -90,8 +90,9 @@ export async function computeWeeklySnapshots(opts: {
   }>;
 
   const modelsSeen = new Set<number>();
-  let upserted = 0;
-
+  // Pre-compute all snapshot rows so the whole batch lands in one transaction.
+  // Mid-loop failure would otherwise leave the week half-written.
+  const valuesToUpsert: Array<typeof marketSnapshots.$inferInsert> = [];
   for (const row of rows) {
     const prices = (row.active_prices ?? []).filter((p) => Number.isFinite(p) && p > 0);
     if (prices.length < minCohortSize) continue;
@@ -107,44 +108,53 @@ export async function computeWeeklySnapshots(opts: {
     const stats = computeSnapshot(inputs);
     const soldThisWeek = Number(row.sold_this_week);
 
-    await db
-      .insert(marketSnapshots)
-      .values({
-        modelId: row.model_id,
-        region: row.region,
-        yearBucket: row.year_bucket,
-        mileageBucket: row.mileage_bucket,
-        period: 'week',
-        capturedOn: weekStart,
-        avgPriceEur: stats.avgPriceEur != null ? String(stats.avgPriceEur) : null,
-        medianPriceEur: stats.medianPriceEur != null ? String(stats.medianPriceEur) : null,
-        p25PriceEur: stats.p25PriceEur != null ? String(stats.p25PriceEur) : null,
-        p75PriceEur: stats.p75PriceEur != null ? String(stats.p75PriceEur) : null,
-        countActive: stats.countActive,
-        countSold: soldThisWeek,
-        daysToSellAvg: stats.daysToSellAvg != null ? String(stats.daysToSellAvg) : null,
-      })
-      .onConflictDoUpdate({
-        target: [
-          marketSnapshots.modelId,
-          marketSnapshots.region,
-          marketSnapshots.yearBucket,
-          marketSnapshots.mileageBucket,
-          marketSnapshots.period,
-          marketSnapshots.capturedOn,
-        ],
-        set: {
-          avgPriceEur: sql`excluded.avg_price_eur`,
-          medianPriceEur: sql`excluded.median_price_eur`,
-          p25PriceEur: sql`excluded.p25_price_eur`,
-          p75PriceEur: sql`excluded.p75_price_eur`,
-          countActive: sql`excluded.count_active`,
-          countSold: sql`excluded.count_sold`,
-          daysToSellAvg: sql`excluded.days_to_sell_avg`,
-          computedAt: sql`now()`,
-        },
-      });
-    upserted++;
+    valuesToUpsert.push({
+      modelId: row.model_id,
+      region: row.region,
+      yearBucket: row.year_bucket,
+      mileageBucket: row.mileage_bucket,
+      period: 'week',
+      capturedOn: weekStart,
+      avgPriceEur: stats.avgPriceEur != null ? String(stats.avgPriceEur) : null,
+      medianPriceEur: stats.medianPriceEur != null ? String(stats.medianPriceEur) : null,
+      p25PriceEur: stats.p25PriceEur != null ? String(stats.p25PriceEur) : null,
+      p75PriceEur: stats.p75PriceEur != null ? String(stats.p75PriceEur) : null,
+      countActive: stats.countActive,
+      countSold: soldThisWeek,
+      daysToSellAvg: stats.daysToSellAvg != null ? String(stats.daysToSellAvg) : null,
+    });
+  }
+
+  let upserted = 0;
+  if (valuesToUpsert.length > 0) {
+    await db.transaction(async (tx) => {
+      for (const v of valuesToUpsert) {
+        await tx
+          .insert(marketSnapshots)
+          .values(v)
+          .onConflictDoUpdate({
+            target: [
+              marketSnapshots.modelId,
+              marketSnapshots.region,
+              marketSnapshots.yearBucket,
+              marketSnapshots.mileageBucket,
+              marketSnapshots.period,
+              marketSnapshots.capturedOn,
+            ],
+            set: {
+              avgPriceEur: sql`excluded.avg_price_eur`,
+              medianPriceEur: sql`excluded.median_price_eur`,
+              p25PriceEur: sql`excluded.p25_price_eur`,
+              p75PriceEur: sql`excluded.p75_price_eur`,
+              countActive: sql`excluded.count_active`,
+              countSold: sql`excluded.count_sold`,
+              daysToSellAvg: sql`excluded.days_to_sell_avg`,
+              computedAt: sql`now()`,
+            },
+          });
+        upserted++;
+      }
+    });
   }
 
   return {

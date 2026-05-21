@@ -13,6 +13,7 @@
 
 import { sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
+import { toBigInt } from '@/lib/db/bigint';
 import { flipOpportunities } from '@/lib/db/schema';
 
 export type FlipComputeStats = {
@@ -141,7 +142,7 @@ export async function computeFlipOpportunities(): Promise<FlipComputeStats> {
       confidence = 'low';
     }
 
-    const listingId = BigInt(c.id as number);
+    const listingId = toBigInt(c.id);
     const potentialGain = c.median_eur - c.price_eur;
 
     await db

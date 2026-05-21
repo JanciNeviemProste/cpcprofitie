@@ -3,6 +3,8 @@
 // regions in prod). Returns whether the request is allowed and how long the
 // caller should wait if not.
 
+import * as Sentry from '@sentry/nextjs';
+
 export type RateLimitVerdict = {
   allowed: boolean;
   remaining: number;
@@ -65,7 +67,12 @@ async function upstashRateLimit(
       ]),
     });
     if (!res.ok) {
-      // fail-open on infra issues so we don't break user requests
+      // fail-open on infra issues so we don't break user requests, but alert
+      // so we know rate limits are effectively disabled.
+      Sentry.captureMessage(`rate-limit upstash returned ${res.status}`, {
+        level: 'warning',
+        tags: { component: 'rate-limit' },
+      });
       return { allowed: true, remaining: limit, resetMs: windowMs };
     }
     const [{ result: count }] = (await res.json()) as { result: number }[];
@@ -75,7 +82,8 @@ async function upstashRateLimit(
       remaining,
       resetMs: windowMs - (Date.now() % windowMs),
     };
-  } catch {
+  } catch (e) {
+    Sentry.captureException(e, { tags: { component: 'rate-limit' } });
     return { allowed: true, remaining: limit, resetMs: windowMs };
   }
 }

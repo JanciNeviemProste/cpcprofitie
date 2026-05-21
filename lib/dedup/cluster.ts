@@ -13,6 +13,7 @@
 
 import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
+import { toBigInt } from '@/lib/db/bigint';
 import { listingDetails, listings } from '@/lib/db/schema';
 
 export type ClusterStats = {
@@ -185,7 +186,7 @@ export async function backfillFingerprints(opts: { limit?: number } = {}): Promi
     await db
       .update(listings)
       .set({ fingerprint: fp })
-      .where(and(eq(listings.id, BigInt(r.id as number)), isNull(listings.fingerprint)));
+      .where(and(eq(listings.id, toBigInt(r.id)), isNull(listings.fingerprint)));
     updated++;
   }
   return updated;

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
 import { sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
+import { toBigInt } from '@/lib/db/bigint';
 
 // Daily HEAD-check cron — runs 03:00 UTC. Walks 1/7 of active listings per
 // day so the full population gets refreshed once a week. Listings that 404 /
@@ -80,12 +81,12 @@ export async function GET(request: Request) {
       stats.checked++;
       if (res.status === 404 || res.status === 410) {
         await db.execute(sql`
-          UPDATE listings SET removed_at = now() WHERE id = ${BigInt(row.id as number)}
+          UPDATE listings SET removed_at = now() WHERE id = ${toBigInt(row.id)}
         `);
         stats.markedRemoved++;
       } else if (res.status >= 200 && res.status < 400) {
         await db.execute(sql`
-          UPDATE listings SET last_seen_at = now() WHERE id = ${BigInt(row.id as number)}
+          UPDATE listings SET last_seen_at = now() WHERE id = ${toBigInt(row.id)}
         `);
         stats.stillLive++;
       }
@@ -99,7 +100,13 @@ export async function GET(request: Request) {
     await sleep(CRAWL_DELAY_MS);
   }
 
-  return NextResponse.json({ runAt: new Date().toISOString(), stats });
+  // 502 if more than half the checks errored — partial failure shouldn't
+  // mark the cron green.
+  const tooManyErrors = stats.checked > 0 && stats.errors > stats.checked / 2;
+  return NextResponse.json(
+    { runAt: new Date().toISOString(), stats },
+    { status: tooManyErrors ? 502 : 200 },
+  );
 }
 
 function sleep(ms: number): Promise<void> {
