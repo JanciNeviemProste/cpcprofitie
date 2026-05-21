@@ -6,9 +6,19 @@ import { readFileSync } from 'node:fs';
 
 const source = process.argv[2];
 if (!source) {
-  console.error('usage: node scripts/trigger-enrich-loop.mjs <source>');
+  console.error('usage: node scripts/trigger-enrich-loop.mjs <source> [--partition=K --modulo=N]');
   process.exit(2);
 }
+// Optional partitioning so N shells split the backlog by id % modulo.
+let partition;
+let modulo;
+for (const arg of process.argv.slice(3)) {
+  const p = /^--partition=(\d+)$/.exec(arg);
+  const m = /^--modulo=(\d+)$/.exec(arg);
+  if (p) partition = Number(p[1]);
+  if (m) modulo = Number(m[1]);
+}
+const partitionTag = partition != null && modulo != null ? `[${partition}/${modulo}]` : '';
 
 const env = readFileSync('.env.local', 'utf8');
 const m = /^CRON_SECRET=(.+)$/m.exec(env);
@@ -38,7 +48,9 @@ async function callOnce() {
         Authorization: 'Bearer ' + secret,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ source }),
+      body: JSON.stringify(
+        partition != null && modulo != null ? { source, partition, modulo } : { source },
+      ),
       signal: ac.signal,
     });
     const text = await res.text();
@@ -47,24 +59,24 @@ async function callOnce() {
     try {
       parsed = JSON.parse(text);
     } catch {
-      console.log(`[${source}][${ts}] inv ${invocation}: bad response after ${ms}ms — ${text.slice(0, 200)}`);
+      console.log(`[${source}${partitionTag}][${ts}] inv ${invocation}: bad response after ${ms}ms — ${text.slice(0, 200)}`);
       return { done: false, fatal: text.includes('TIMEOUT') ? false : true };
     }
     if (parsed.error) {
-      console.log(`[${source}][${ts}] inv ${invocation}: ERROR ${parsed.error} ${parsed.message ?? ''}`);
+      console.log(`[${source}${partitionTag}][${ts}] inv ${invocation}: ERROR ${parsed.error} ${parsed.message ?? ''}`);
       return { done: false, fatal: parsed.error === 'unauthorized' };
     }
     runningTotal += parsed.totalDetails ?? 0;
     consecutiveErrors = 0;
     const totalSecs = ((Date.now() - startedAt) / 1000).toFixed(0);
     console.log(
-      `[${source}][${ts}] inv ${invocation}: ${parsed.totalFetched}/${parsed.batches * 10} fetched, ${parsed.totalDetails} details, ${parsed.totalErrors} errors, ${(ms / 1000).toFixed(0)}s. ` +
+      `[${source}${partitionTag}][${ts}] inv ${invocation}: ${parsed.totalFetched}/${parsed.batches * 10} fetched, ${parsed.totalDetails} details, ${parsed.totalErrors} errors, ${(ms / 1000).toFixed(0)}s. ` +
         `done=${parsed.done}. running total=${runningTotal} in ${totalSecs}s`,
     );
     return { done: parsed.done === true, fatal: false };
   } catch (e) {
     consecutiveErrors++;
-    console.log(`[${source}][${ts}] inv ${invocation}: FETCH ERROR ${e.message} (consec=${consecutiveErrors})`);
+    console.log(`[${source}${partitionTag}][${ts}] inv ${invocation}: FETCH ERROR ${e.message} (consec=${consecutiveErrors})`);
     return { done: false, fatal: consecutiveErrors >= 10 };
   } finally {
     clearTimeout(abortTimer);
@@ -74,11 +86,11 @@ async function callOnce() {
 while (true) {
   const result = await callOnce();
   if (result.done) {
-    console.log(`[${source}] ALL DONE after ${invocation} invocations, total ${runningTotal} enriched`);
+    console.log(`[${source}${partitionTag}] ALL DONE after ${invocation} invocations, total ${runningTotal} enriched`);
     break;
   }
   if (result.fatal) {
-    console.log(`[${source}] FATAL — ${consecutiveErrors} consecutive errors, aborting`);
+    console.log(`[${source}${partitionTag}] FATAL — ${consecutiveErrors} consecutive errors, aborting`);
     process.exit(1);
   }
   // Exponential backoff on consecutive errors: 3s → 10s → 30s → 60s → 60s ...

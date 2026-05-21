@@ -7,11 +7,21 @@ import { getDb } from '../db';
 import { listingDetails, listings } from '../db/schema';
 import type { NormalizedListing, Source } from './types';
 
+export type PartitionOpts = { index: number; modulo: number };
+
 export async function loadUnenrichedBatch(
   source: Source,
   size: number,
+  partition?: PartitionOpts,
 ): Promise<NormalizedListing[]> {
   const db = getDb();
+  // id-based partitioning lets N parallel loops work on disjoint subsets of
+  // listings without `FOR UPDATE SKIP LOCKED`. Each shell gets (index, modulo)
+  // and we filter `id % modulo = index`.
+  const partitionFilter =
+    partition && partition.modulo > 1
+      ? sql`(${listings.id} % ${partition.modulo}) = ${partition.index}`
+      : undefined;
   const rows = await db
     .select({
       id: listings.id,
@@ -35,6 +45,7 @@ export async function loadUnenrichedBatch(
             .from(listingDetails)
             .where(eq(listingDetails.listingId, listings.id)),
         ),
+        partitionFilter,
       ),
     )
     .orderBy(listings.id)

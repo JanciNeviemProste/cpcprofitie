@@ -30,13 +30,23 @@ export async function POST(request: Request) {
     }
   }
 
-  let payload: { source?: string } = {};
+  let payload: { source?: string; partition?: number; modulo?: number } = {};
   try {
     payload = await request.json();
   } catch {
     return NextResponse.json({ error: 'bad_json' }, { status: 400 });
   }
   const sourceId = payload.source;
+  // Optional id-based partitioning so N shells can run in parallel on
+  // disjoint id subsets.
+  const partition =
+    typeof payload.partition === 'number' &&
+    typeof payload.modulo === 'number' &&
+    payload.modulo > 1 &&
+    payload.partition >= 0 &&
+    payload.partition < payload.modulo
+      ? { index: payload.partition, modulo: payload.modulo }
+      : undefined;
   if (!sourceId || !ALL_SOURCES.includes(sourceId as Source)) {
     return NextResponse.json(
       { error: 'invalid_source', valid: ALL_SOURCES },
@@ -60,7 +70,7 @@ export async function POST(request: Request) {
   while (Date.now() < deadline) {
     let batch;
     try {
-      batch = await loadUnenrichedBatch(sourceId as Source, BATCH_SIZE);
+      batch = await loadUnenrichedBatch(sourceId as Source, BATCH_SIZE, partition);
     } catch (e) {
       Sentry.captureException(e, {
         tags: { component: 'enrich-source', step: 'loadBatch', source: sourceId },
