@@ -36,6 +36,11 @@ export async function computeWeeklySnapshots(opts: {
   const minCohortSize = opts.minCohortSize ?? 3;
   const asOf = opts.asOf ?? new Date();
   const weekStart = isoWeekStart(asOf);
+  // Inline the timestamp literal — Drizzle's `${weekStart}` Date binding
+  // intermittently fails type resolution inside ARRAY_AGG…FILTER expressions
+  // (pg adapter sends ambiguous type). String literal + ::timestamptz cast
+  // sidesteps it without changing semantics.
+  const weekStartLit = `'${weekStart.toISOString()}'::timestamptz`;
   const db = getDb();
 
   // One big SQL: group canonical listings by (model, region, year-bucket,
@@ -64,11 +69,11 @@ export async function computeWeeklySnapshots(opts: {
           AND l.sold_at IS NULL
           AND l.removed_at IS NULL
       ) AS active_prices,
-      COUNT(*) FILTER (WHERE l.sold_at IS NOT NULL AND l.sold_at >= ${weekStart.toISOString()}::timestamptz) AS sold_this_week,
+      COUNT(*) FILTER (WHERE l.sold_at IS NOT NULL AND l.sold_at >= ${sql.raw(weekStartLit)}) AS sold_this_week,
       ARRAY_AGG(
         EXTRACT(EPOCH FROM (coalesce(l.sold_at, l.removed_at) - l.first_seen_at)) / 86400.0
       ) FILTER (
-        WHERE l.sold_at IS NOT NULL AND l.sold_at >= ${weekStart.toISOString()}::timestamptz
+        WHERE l.sold_at IS NOT NULL AND l.sold_at >= ${sql.raw(weekStartLit)}
       ) AS sold_days_listed
     FROM listings l
     WHERE l.model_id IS NOT NULL
