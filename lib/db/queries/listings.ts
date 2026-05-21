@@ -247,6 +247,8 @@ export async function getListingById(
     region: base.region,
     firstSeenAt: base.firstSeenAt,
     heroPhotoUrl: photos[0] ?? null,
+    viewCount: base.viewCount ?? null,
+    isFeatured: base.isFeatured ?? false,
     description: base.description,
     vin: base.vin,
     bodyType: base.bodyType,

@@ -90,9 +90,21 @@ export function ListingsTable({ rows }: { rows: ListingRow[] }) {
                     </Link>
                   </td>
                   <td className="px-3 py-2">
-                    <Link href={href} className="font-medium hover:underline">
-                      {title(r)}
-                    </Link>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link href={href} className="font-medium hover:underline">
+                        {title(r)}
+                      </Link>
+                      {r.isFeatured ? (
+                        <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
+                          🔥 Featured
+                        </span>
+                      ) : null}
+                      {r.viewCount != null && r.viewCount > 100 ? (
+                        <span className="text-xs text-muted-foreground tabular-nums">
+                          {r.viewCount.toLocaleString('sk-SK')} zobrazení
+                        </span>
+                      ) : null}
+                    </div>
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">{r.year ?? '—'}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{formatKm(r.mileageKm)}</td>
