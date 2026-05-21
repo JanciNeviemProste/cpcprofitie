@@ -2,6 +2,7 @@ import { DealsTable } from '@/components/app/deals/deals-table';
 import { getTopDeals, type DealsSort } from '@/lib/db/queries/trends';
 
 export const dynamic = 'force-dynamic';
+export const metadata = { title: 'Deals — podhodnotené inzeráty · CPCProfit' };
 
 const VALID_SORTS: DealsSort[] = ['discount', 'gain'];
 

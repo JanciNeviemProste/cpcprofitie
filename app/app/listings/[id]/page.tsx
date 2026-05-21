@@ -7,6 +7,20 @@ import { getPriceHistory } from '@/lib/db/queries/price-history';
 
 export const dynamic = 'force-dynamic';
 
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  let parsedId: bigint;
+  try {
+    parsedId = BigInt(id);
+  } catch {
+    return { title: 'Inzerát · CPCProfit' };
+  }
+  const detail = await getListingById(parsedId);
+  if (!detail) return { title: 'Inzerát · CPCProfit' };
+  const title = detail.rawTitle ?? [detail.makeName, detail.modelName].filter(Boolean).join(' ');
+  return { title: `${title || `Inzerát #${detail.sourceId}`} · CPCProfit` };
+}
+
 const NBSP = ' ';
 
 function formatPrice(eur: number | null): string {

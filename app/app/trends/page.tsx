@@ -2,6 +2,7 @@ import { TrendsTable } from '@/components/app/trends/trends-table';
 import { getTrendingModels, type TrendsSort } from '@/lib/db/queries/trends';
 
 export const dynamic = 'force-dynamic';
+export const metadata = { title: 'Trendy modelov · CPCProfit' };
 
 const VALID_SORTS: TrendsSort[] = ['demand', 'movement', 'price-drop'];
 
