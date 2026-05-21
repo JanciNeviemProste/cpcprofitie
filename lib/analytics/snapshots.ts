@@ -64,11 +64,11 @@ export async function computeWeeklySnapshots(opts: {
           AND l.sold_at IS NULL
           AND l.removed_at IS NULL
       ) AS active_prices,
-      COUNT(*) FILTER (WHERE l.sold_at IS NOT NULL AND l.sold_at >= ${weekStart}) AS sold_this_week,
+      COUNT(*) FILTER (WHERE l.sold_at IS NOT NULL AND l.sold_at >= ${weekStart.toISOString()}::timestamptz) AS sold_this_week,
       ARRAY_AGG(
         EXTRACT(EPOCH FROM (coalesce(l.sold_at, l.removed_at) - l.first_seen_at)) / 86400.0
       ) FILTER (
-        WHERE l.sold_at IS NOT NULL AND l.sold_at >= ${weekStart}
+        WHERE l.sold_at IS NOT NULL AND l.sold_at >= ${weekStart.toISOString()}::timestamptz
       ) AS sold_days_listed
     FROM listings l
     WHERE l.model_id IS NOT NULL
