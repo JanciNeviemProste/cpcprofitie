@@ -1,7 +1,6 @@
 export { parseListingsPage as parseAutobazarSkListings, autobazarSk } from './sources/autobazar-sk';
 export { autobazarEu } from './sources/autobazar-eu';
 export { bazosSk } from './sources/bazos-sk';
-export { sautoCz } from './sources/sauto-cz';
 export { SOURCES, getSource } from './sources/registry';
 export { runScrape, __resetRobotsCache, ScrapeForbiddenError, USER_AGENT } from './scrape';
 export { computeSnapshot } from './aggregate';

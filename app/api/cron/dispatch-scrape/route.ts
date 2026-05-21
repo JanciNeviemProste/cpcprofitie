@@ -121,8 +121,12 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({
-    dispatchedAt: new Date().toISOString(),
-    summary,
-  });
+  // 502 if any source failed — Vercel Cron Dashboard then surfaces it red
+  // instead of pretending everything's fine. Critical for not silently
+  // regressing to the "weeks of zero data" pattern.
+  const anyFailed = summary.some((s) => s.status === 'failed');
+  return NextResponse.json(
+    { dispatchedAt: new Date().toISOString(), summary },
+    { status: anyFailed ? 502 : 200 },
+  );
 }

@@ -1,7 +1,6 @@
 import { autobazarSk } from './autobazar-sk';
 import { autobazarEu } from './autobazar-eu';
 import { bazosSk } from './bazos-sk';
-import { sautoCz } from './sauto-cz';
 import type { ScraperSource } from './source-interface';
 import type { Source } from '../types';
 
@@ -9,7 +8,6 @@ export const SOURCES: Record<Source, ScraperSource> = {
   'autobazar.sk': autobazarSk,
   'autobazar.eu': autobazarEu,
   'bazos.sk': bazosSk,
-  'sauto.cz': sautoCz,
 };
 
 export function getSource(id: Source): ScraperSource {

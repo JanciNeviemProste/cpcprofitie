@@ -1,12 +1,10 @@
 // Shared types for the scraping pipeline. The pipeline emits NormalizedListing
 // rows that downstream upsert + aggregation steps consume regardless of source.
 
-export type Source = 'autobazar.sk' | 'autobazar.eu' | 'bazos.sk' | 'sauto.cz';
+export type Source = 'autobazar.sk' | 'autobazar.eu' | 'bazos.sk';
 
-// sauto.cz is intentionally excluded from cron runs: its robots.txt has
+// sauto.cz was deliberately dropped: its robots.txt has
 // `User-agent: *  Disallow: /` and only whitelists Googlebot/SeznamBot/etc.
-// We respect that. The source plugin still exists in the registry for
-// historical fixtures + future use if we get explicit written permission.
 export const ALL_SOURCES: readonly Source[] = [
   'autobazar.sk',
   'autobazar.eu',

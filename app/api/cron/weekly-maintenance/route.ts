@@ -83,10 +83,13 @@ export async function GET(request: Request) {
     });
   }
 
-  return NextResponse.json({
-    runAt: new Date().toISOString(),
-    summary,
-    errors,
-    ok: errors.length === 0,
-  });
+  return NextResponse.json(
+    {
+      runAt: new Date().toISOString(),
+      summary,
+      errors,
+      ok: errors.length === 0,
+    },
+    { status: errors.length > 0 ? 500 : 200 },
+  );
 }

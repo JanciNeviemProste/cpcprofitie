@@ -78,6 +78,10 @@ async function ensureMakeId(makeSlug: string): Promise<number | null> {
       makeSlug,
       error: e instanceof Error ? e.message : e,
     });
+    Sentry.captureException(e, {
+      tags: { component: 'persist', step: 'ensureMakeId' },
+      extra: { makeSlug },
+    });
     return null;
   }
 }
@@ -126,6 +130,10 @@ async function ensureModelId(
     console.error('ensureModelId_failed', {
       modelSlug,
       error: e instanceof Error ? e.message : e,
+    });
+    Sentry.captureException(e, {
+      tags: { component: 'persist', step: 'ensureModelId' },
+      extra: { makeSlug, modelSlug },
     });
     return null;
   }
