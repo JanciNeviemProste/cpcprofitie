@@ -2,7 +2,7 @@
 // UI to paginate over scraped inventory. No write paths live here — those
 // stay in `lib/scraping/persist.ts`.
 
-import { and, asc, desc, eq, gte, ilike, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, exists, gte, ilike, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { getDb } from '../index';
 import {
   listingDetails,
@@ -11,19 +11,26 @@ import {
   vehicleMakes,
   vehicleModels,
 } from '../schema';
-import type { RawFuel, Source } from '@/lib/scraping/types';
+import type { RawFuel, RawTransmission, Source } from '@/lib/scraping/types';
 
 export type ListingsSort = 'newest' | 'oldest' | 'price-asc' | 'price-desc';
 
 export type ListingFilters = {
-  source?: Source;
+  source?: Source | Source[];
   /** Substring match against make name. autobazar.eu sitemap listings have
    *  no title, so search hits the joined make/model name instead. */
   q?: string;
   minPrice?: number;
   maxPrice?: number;
   minYear?: number;
-  fuel?: RawFuel;
+  maxYear?: number;
+  minKm?: number;
+  maxKm?: number;
+  fuel?: RawFuel | RawFuel[];
+  transmission?: RawTransmission | RawTransmission[];
+  regions?: string[];
+  hasPhoto?: boolean;
+  featuredOnly?: boolean;
 };
 
 export type ListingRow = {
@@ -66,22 +73,66 @@ type GetListingsOpts = {
 };
 
 function buildWhere(filters: ListingFilters | undefined) {
-  if (!filters) return undefined;
-  const parts = [];
-  if (filters.source) parts.push(eq(listings.source, filters.source));
-  if (filters.minPrice != null)
-    parts.push(gte(listings.priceEur, String(filters.minPrice)));
-  if (filters.maxPrice != null)
-    parts.push(lte(listings.priceEur, String(filters.maxPrice)));
-  if (filters.minYear != null) parts.push(gte(listings.year, filters.minYear));
-  if (filters.fuel) parts.push(eq(listings.fuel, filters.fuel));
-  if (filters.q && filters.q.trim()) {
-    const needle = `%${filters.q.trim()}%`;
-    parts.push(
-      sql`(${vehicleMakes.name} ILIKE ${needle} OR ${vehicleModels.name} ILIKE ${needle})`,
-    );
+  const parts = [] as any[];
+  // Active-only default: exclude soft-removed rows from all UI queries.
+  parts.push(isNull(listings.removedAt));
+
+  if (filters) {
+    if (filters.source) {
+      if (Array.isArray(filters.source)) {
+        if (filters.source.length > 0)
+          parts.push(inArray(listings.source, filters.source));
+      } else {
+        parts.push(eq(listings.source, filters.source));
+      }
+    }
+    if (filters.minPrice != null)
+      parts.push(gte(listings.priceEur, String(filters.minPrice)));
+    if (filters.maxPrice != null)
+      parts.push(lte(listings.priceEur, String(filters.maxPrice)));
+    if (filters.minYear != null) parts.push(gte(listings.year, filters.minYear));
+    if (filters.maxYear != null) parts.push(lte(listings.year, filters.maxYear));
+    if (filters.minKm != null) parts.push(gte(listings.mileageKm, filters.minKm));
+    if (filters.maxKm != null) parts.push(lte(listings.mileageKm, filters.maxKm));
+    if (filters.fuel) {
+      if (Array.isArray(filters.fuel)) {
+        if (filters.fuel.length > 0) parts.push(inArray(listings.fuel, filters.fuel));
+      } else {
+        parts.push(eq(listings.fuel, filters.fuel));
+      }
+    }
+    if (filters.transmission) {
+      if (Array.isArray(filters.transmission)) {
+        if (filters.transmission.length > 0)
+          parts.push(inArray(listings.transmission, filters.transmission));
+      } else {
+        parts.push(eq(listings.transmission, filters.transmission));
+      }
+    }
+    if (filters.regions && filters.regions.length > 0) {
+      parts.push(inArray(listings.region, filters.regions));
+    }
+    if (filters.hasPhoto === true) {
+      parts.push(
+        exists(
+          getDb()
+            .select({ x: sql`1` })
+            .from(listingPhotos)
+            .where(eq(listingPhotos.listingId, listings.id)),
+        ),
+      );
+    }
+    if (filters.featuredOnly === true) {
+      parts.push(eq(listings.isFeatured, true));
+    }
+    if (filters.q && filters.q.trim()) {
+      const needle = `%${filters.q.trim()}%`;
+      parts.push(
+        sql`(${vehicleMakes.name} ILIKE ${needle} OR ${vehicleModels.name} ILIKE ${needle})`,
+      );
+    }
   }
-  if (parts.length === 0) return undefined;
+
   return and(...parts);
 }
 
@@ -283,6 +334,18 @@ export type ListingsStats = {
   totalEnriched: number;
   bySource: SourceCount[];
 };
+
+export async function getDistinctRegions(): Promise<string[]> {
+  const db = getDb();
+  const rows = await db
+    .selectDistinct({ region: listings.region })
+    .from(listings)
+    .where(sql`${listings.region} IS NOT NULL`)
+    .orderBy(asc(listings.region));
+  return rows
+    .map((r) => r.region)
+    .filter((v): v is string => v != null);
+}
 
 export async function getListingsStats(): Promise<ListingsStats> {
   const db = getDb();
