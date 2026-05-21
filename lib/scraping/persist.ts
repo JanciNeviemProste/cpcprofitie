@@ -113,7 +113,7 @@ async function ensureModelId(
         slug: modelSlug,
         name: displayName ?? toTitleCase(modelSlug),
       })
-      .onConflictDoNothing({ target: vehicleModels.slug });
+      .onConflictDoNothing({ target: [vehicleModels.makeId, vehicleModels.slug] });
     const refound = await db
       .select({ id: vehicleModels.id })
       .from(vehicleModels)
