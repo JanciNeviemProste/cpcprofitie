@@ -1,27 +1,36 @@
-import { DealsTable } from '@/components/app/deals/deals-table';
-import { getTopDeals, type DealsSort } from '@/lib/db/queries/trends';
+import { DealsFilters, type DealsFiltersValue } from '@/components/app/deals/filters';
+import { DealCard } from '@/components/app/deals/deal-card';
+import { HeroDeal } from '@/components/app/deals/hero-deal';
+import { getTopDealsV2 } from '@/lib/db/queries/deals';
+import type { Source } from '@/lib/scraping/types';
 
 export const dynamic = 'force-dynamic';
-export const metadata = { title: 'Deals — podhodnotené inzeráty · CPCProfit' };
+export const metadata = {
+  title: 'Deals 2.0 — DealScore vážené príležitosti · CPCProfit',
+};
 
-const VALID_SORTS: DealsSort[] = ['discount', 'gain'];
+const ALL_SOURCES: ReadonlyArray<Source> = ['autobazar.sk', 'autobazar.eu', 'bazos.sk'];
 
-function parseSort(v: string | undefined): DealsSort {
-  if (v && (VALID_SORTS as string[]).includes(v)) return v as DealsSort;
-  return 'discount';
+function parseList(v: string | string[] | undefined): string[] {
+  if (!v) return [];
+  const raw = Array.isArray(v) ? v.join(',') : v;
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
-function parseInt(v: string | undefined): number | undefined {
+function parseNum(v: string | string[] | undefined): number | undefined {
   if (!v) return undefined;
-  const n = Number(v);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
+  const raw = Array.isArray(v) ? v[0] : v;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
 }
 
-function parseConf(
-  v: string | undefined,
-): 'low' | 'medium' | 'high' | undefined {
-  if (v === 'low' || v === 'medium' || v === 'high') return v;
-  return undefined;
+function parseSources(v: string | string[] | undefined): Source[] {
+  return parseList(v).filter((s): s is Source =>
+    (ALL_SOURCES as ReadonlyArray<string>).includes(s),
+  );
 }
 
 export default async function DealsPage({
@@ -30,64 +39,63 @@ export default async function DealsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
-  const sort = parseSort(typeof sp.sort === 'string' ? sp.sort : undefined);
-  // Default to medium+ — low-confidence deals are noisy.
-  const minConfidence =
-    parseConf(typeof sp.confidence === 'string' ? sp.confidence : undefined) ?? 'medium';
-  const minGainEur = parseInt(typeof sp.minGain === 'string' ? sp.minGain : undefined);
-  const maxPriceEur = parseInt(typeof sp.maxPrice === 'string' ? sp.maxPrice : undefined);
+  const minScore = parseNum(sp.minScore) ?? 70;
+  const sources = parseSources(sp.sources);
+  const regions = parseList(sp.regions);
+  const maxBudget = parseNum(sp.maxBudget);
 
-  const rows = await getTopDeals({
-    limit: 50,
-    sort,
-    filters: { minConfidence, minGainEur, maxPriceEur },
+  const filtersValue: DealsFiltersValue = {
+    minScore,
+    sources,
+    regions,
+    maxBudget: maxBudget ?? null,
+  };
+
+  const deals = await getTopDealsV2({
+    limit: 24,
+    minScore,
+    sources: sources.length > 0 ? sources : undefined,
+    regions: regions.length > 0 ? regions : undefined,
+    maxBudget,
   });
+
+  const [hero, ...rest] = deals;
 
   return (
     <div className="container mx-auto px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold tracking-tight">Deals</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
-          Inzeráty pod trhovým mediánom. Cena pod P25 svojho kohortu (model + región +
-          rok ±2 + km bucket) — potenciálne flip príležitosti.
+      <header className="mb-6">
+        <h1 className="font-heading text-3xl font-bold tracking-tight">Deals</h1>
+        <p className="text-muted-foreground mt-1.5 max-w-2xl text-sm">
+          Auta pod cenou trhu — DealScore vážený algoritmus kombinuje zľavu, veľkosť
+          kohortu, typ predajcu, kvalitu fotiek a čerstvosť inzerátu.
         </p>
-      </div>
+      </header>
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="flex gap-1">
-          {VALID_SORTS.map((s) => (
-            <a
-              key={s}
-              href={`/app/deals?sort=${s}&confidence=${minConfidence}`}
-              className={
-                s === sort
-                  ? 'bg-primary text-primary-foreground rounded-md px-3 py-1.5 text-xs font-medium'
-                  : 'border-border/60 hover:bg-muted rounded-md border px-3 py-1.5 text-xs font-medium'
-              }
-            >
-              {s === 'discount' ? 'Najväčšia zľava' : 'Najväčší zisk'}
-            </a>
-          ))}
-        </div>
-        <div className="bg-border/40 mx-1 h-5 w-px" />
-        <div className="flex gap-1">
-          {(['low', 'medium', 'high'] as const).map((c) => (
-            <a
-              key={c}
-              href={`/app/deals?sort=${sort}&confidence=${c}`}
-              className={
-                c === minConfidence
-                  ? 'bg-primary text-primary-foreground rounded-md px-3 py-1.5 text-xs font-medium'
-                  : 'border-border/60 hover:bg-muted rounded-md border px-3 py-1.5 text-xs font-medium'
-              }
-            >
-              {c === 'high' ? 'Min. vysoká' : c === 'medium' ? 'Min. stredná' : 'Všetky'}
-            </a>
-          ))}
-        </div>
-      </div>
+      <DealsFilters initial={filtersValue} />
 
-      <DealsTable rows={rows} />
+      {deals.length === 0 ? (
+        <div className="border-border/40 bg-card/40 rounded-2xl border p-12 text-center backdrop-blur-sm">
+          <div className="mx-auto mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full bg-muted text-2xl">
+            🚗
+          </div>
+          <h2 className="font-heading text-lg font-semibold">Žiadne deals momentálne</h2>
+          <p className="text-muted-foreground mx-auto mt-1 max-w-md text-sm">
+            Trh je vyrovnaný — žiadne auto neprešlo cez tvoje filtre. Skús znížiť min.
+            DealScore alebo skontroluj zajtra.
+          </p>
+        </div>
+      ) : (
+        <>
+          {hero ? <HeroDeal deal={hero} /> : null}
+          {rest.length > 0 ? (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {rest.map((d) => (
+                <DealCard key={d.listingId.toString()} deal={d} />
+              ))}
+            </div>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
