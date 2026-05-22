@@ -95,12 +95,27 @@ export async function runEnrichment(
         headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' },
       });
       fetched++;
-      if (!res.ok) {
-        errors.push(`${listing.sourceId}: HTTP ${res.status}`);
+      // bazos.sk redirects deleted listings /inzerat/<id>/ → /inzeraty/<slug>/
+      // (search page) with HTTP 200 instead of 404. Detect by checking the
+      // final URL after redirects.
+      const goneViaRedirect =
+        res.ok &&
+        source.id === 'bazos.sk' &&
+        url.includes('/inzerat/') &&
+        res.url &&
+        !res.url.includes('/inzerat/');
+      if (!res.ok || goneViaRedirect) {
+        const status = goneViaRedirect ? 'redirect→list' : `HTTP ${res.status}`;
+        errors.push(`${listing.sourceId}: ${status}`);
         // Insert a tombstone for permanently-gone listings so loadUnenrichedBatch
         // doesn't re-pick them every run. 404/410 = removed/sold by the source.
         // 403 = source blocks us (e.g. Cloudflare), also permanent for our crawler.
-        if (res.status === 404 || res.status === 410 || res.status === 403) {
+        if (
+          goneViaRedirect ||
+          res.status === 404 ||
+          res.status === 410 ||
+          res.status === 403
+        ) {
           details.push({
             source: source.id,
             sourceId: listing.sourceId,
