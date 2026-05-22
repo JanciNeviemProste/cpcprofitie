@@ -375,6 +375,33 @@ export const getRegionGroups = unstable_cache(
   { revalidate: 600 },
 );
 
+export type TopMake = { name: string; count: number };
+
+// Top N makes by active listing count. Used by the v2 listings UI for the
+// horizontal brand-chip strip under the search input.
+export const getTopMakes = unstable_cache(
+  async (limit = 10): Promise<TopMake[]> => {
+    const db = getDb();
+    const rows = await db
+      .select({
+        name: vehicleMakes.name,
+        n: sql<number>`count(*)::int`,
+      })
+      .from(listings)
+      .leftJoin(vehicleModels, eq(vehicleModels.id, listings.modelId))
+      .leftJoin(vehicleMakes, eq(vehicleMakes.id, vehicleModels.makeId))
+      .where(and(isNull(listings.removedAt), sql`${vehicleMakes.name} IS NOT NULL`))
+      .groupBy(vehicleMakes.name)
+      .orderBy(desc(sql`count(*)`))
+      .limit(limit);
+    return rows
+      .filter((r): r is { name: string; n: number } => r.name != null)
+      .map((r) => ({ name: r.name, count: r.n }));
+  },
+  ['listings-top-makes'],
+  { revalidate: 600 },
+);
+
 export async function getDistinctRegions(): Promise<string[]> {
   const db = getDb();
   const rows = await db
