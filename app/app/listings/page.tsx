@@ -145,6 +145,21 @@ export default async function ListingsPage({
             {formatNumber(stats.totalListings)} inzerátov · {stats.bySource.length} zdroje ·{' '}
             {formatNumber(stats.totalEnriched)} obohatených dát
           </p>
+          <p className="text-muted-foreground mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+            <span className="font-semibold tracking-wide">ROZLOŽENIE</span>
+            {stats.bySource.map((s, i) => {
+              const dot = ['bg-emerald-500', 'bg-sky-500', 'bg-amber-500'][i] ?? 'bg-muted';
+              return (
+                <span key={s.source} className="inline-flex items-center gap-1.5">
+                  <span className={`inline-block h-2 w-2 rounded-full ${dot}`} />
+                  <span>{s.source}</span>
+                  <span className="text-foreground tabular-nums font-medium">
+                    {formatNumber(s.count)}
+                  </span>
+                </span>
+              );
+            })}
+          </p>
         </div>
         <span className="border-border/60 bg-card/40 text-muted-foreground rounded-full border px-3 py-1 text-xs">
           Nájdených{' '}

@@ -190,6 +190,7 @@ export function ListingsFilterBar({ sources, regions, initialFilters }: Props) {
   const [expanded, setExpanded] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isFirst = useRef(true);
+  const lastPushedRef = useRef<string>('');
 
   const sourceCounts = useMemo(() => {
     const map: Record<string, number> = {};
@@ -201,6 +202,7 @@ export function ListingsFilterBar({ sources, regions, initialFilters }: Props) {
     (next: InitialFilters) => {
       const params = buildParams(next);
       const qs = params.toString();
+      lastPushedRef.current = qs;
       startTransition(() => {
         router.push(qs ? `/app/listings?${qs}` : '/app/listings', { scroll: false });
       });
@@ -222,8 +224,12 @@ export function ListingsFilterBar({ sources, regions, initialFilters }: Props) {
   }, [state, push]);
 
   // Keep local state in sync with external URL changes (e.g. back/forward).
+  // Skip when the URL change is from our own push() — otherwise the user's
+  // edits would be clobbered by stale initialFilters from the previous SSR.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
+    const current = sp.toString();
+    if (current === lastPushedRef.current) return;
     setState(initialFilters);
     isFirst.current = true;
   }, [sp.toString()]);
