@@ -235,12 +235,18 @@ export const flipOpportunities = pgTable(
     potentialGainEur: numeric('potential_gain_eur', { precision: 10, scale: 2 }).notNull(),
     cohortSize: integer('cohort_size').notNull(),
     confidence: confidenceEnum('confidence').notNull(),
+    dealScore: integer('deal_score'),
+    scoreBreakdown: jsonb('score_breakdown'),
+    explainer: text('explainer'),
+    estRecondEur: integer('est_recond_eur').default(800),
+    estProfitEur: integer('est_profit_eur'),
     computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index('flip_opportunities_discount_idx').on(t.discountPct),
     index('flip_opportunities_gain_idx').on(t.potentialGainEur),
     index('flip_opportunities_confidence_idx').on(t.confidence),
+    index('flip_opportunities_deal_score_idx').on(t.dealScore.desc()),
   ],
 );
 

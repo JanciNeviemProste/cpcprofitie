@@ -1,20 +1,22 @@
 // Flip opportunity detection. For every active canonical listing with a
-// price, compares against its cohort (same model + region + year-bucket +
-// mileage-bucket) and flags listings priced meaningfully below the cohort
-// median. Output → flip_opportunities table, displayed in /app/deals.
+// price, compares against its cohort (same model, year±2, mileage±25k) and
+// flags listings priced below the cohort p25 with cohort size >= 5.
+// Output → flip_opportunities table, displayed in /app/deals.
 //
 // Confidence levels:
 //   - low:    cohort 5-9 listings,  OR cohort spans listings older than 30d
 //   - medium: cohort 10-19, recent (<= 30d old)
 //   - high:   cohort >= 20, all listings <= 14d old
 //
-// We only insert rows with discountPct > 5% — anything less is noise once
-// you factor in dealer markup, inspection, paperwork.
+// In addition to the discount/cohort fields, we compute the DealScore
+// 0-100 (see lib/analytics/deal-score.ts), a human-readable explainer,
+// and an estimated profit (sell @ median − price − recond − fees).
 
 import { sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { toBigInt } from '@/lib/db/bigint';
 import { flipOpportunities } from '@/lib/db/schema';
+import { buildExplainer, computeDealScore, estimateProfit } from './deal-score';
 
 export type FlipComputeStats = {
   candidatesScanned: number;
@@ -24,8 +26,24 @@ export type FlipComputeStats = {
   deletedStale: number;
 };
 
-const MIN_DISCOUNT_PCT = 5;
 const MIN_COHORT_FOR_SIGNAL = 5;
+const DEFAULT_RECOND_EUR = 800;
+
+type CandidateRow = {
+  id: string | number | bigint;
+  price_eur: number;
+  median_eur: number | null;
+  p25_eur: number | null;
+  cohort_size: number | string;
+  cohort_oldest: Date | string | null;
+  first_seen_at: Date | string | null;
+  seller_type: 'private' | 'dealer' | null;
+  photo_count: number | string | null;
+  year: number | null;
+  region: string | null;
+  make_name: string | null;
+  model_name: string | null;
+};
 
 /**
  * Recompute flip_opportunities for every active canonical listing.
@@ -42,33 +60,19 @@ export async function computeFlipOpportunities(): Promise<FlipComputeStats> {
     deletedStale: 0,
   };
 
-  // Strategy: one big SQL CTE that, per active canonical listing, joins to
-  // its cohort and computes percentiles via percentile_cont. Then we filter
-  // in TS, upsert qualifiers, and delete non-qualifiers.
-  //
-  // percentile_cont(0.5) WITHIN GROUP (ORDER BY price) is the standard
-  // Postgres percentile aggregate.
+  // Strategy: per active canonical listing, compute its cohort window
+  // (same model, year±2, mileage±25k, active, not self), percentile_cont
+  // for median+p25, plus auxiliary signals (seller_type, photo_count,
+  // make/model/year/region) needed for DealScore + explainer.
   const candidates = (await db.execute(sql`
     WITH active_canonical AS (
       SELECT
         l.id,
         l.model_id,
-        l.region,
         l.price_eur::float8 AS price_eur,
-        CASE
-          WHEN l.year IS NULL THEN 'unknown'
-          WHEN l.year >= 2020 THEN '2020+'
-          WHEN l.year >= 2015 THEN '2015-19'
-          WHEN l.year >= 2010 THEN '2010-14'
-          ELSE '<2010'
-        END AS year_bucket,
-        CASE
-          WHEN l.mileage_km IS NULL OR l.mileage_km < 0 THEN 'unknown'
-          WHEN l.mileage_km < 50000 THEN '0-50k'
-          WHEN l.mileage_km < 100000 THEN '50-100k'
-          WHEN l.mileage_km < 150000 THEN '100-150k'
-          ELSE '150k+'
-        END AS mileage_bucket,
+        l.year,
+        l.mileage_km,
+        l.region,
         l.first_seen_at
       FROM listings l
       WHERE l.canonical_listing_id IS NULL
@@ -77,37 +81,71 @@ export async function computeFlipOpportunities(): Promise<FlipComputeStats> {
         AND l.price_eur IS NOT NULL
         AND l.price_eur > 0
         AND l.model_id IS NOT NULL
+        AND l.year IS NOT NULL
+        AND l.mileage_km IS NOT NULL
+        AND l.mileage_km >= 0
+    ),
+    cohort_pool AS (
+      SELECT
+        l.id,
+        l.model_id,
+        l.price_eur::float8 AS price_eur,
+        l.year,
+        l.mileage_km,
+        l.first_seen_at
+      FROM listings l
+      WHERE l.canonical_listing_id IS NULL
+        AND l.sold_at IS NULL
+        AND l.removed_at IS NULL
+        AND l.price_eur IS NOT NULL
+        AND l.price_eur > 0
+        AND l.model_id IS NOT NULL
+        AND l.year IS NOT NULL
+        AND l.mileage_km IS NOT NULL
+        AND l.mileage_km >= 0
     ),
     cohort_agg AS (
       SELECT
-        model_id,
-        region,
-        year_bucket,
-        mileage_bucket,
-        percentile_cont(0.5) WITHIN GROUP (ORDER BY price_eur) AS median_eur,
-        percentile_cont(0.25) WITHIN GROUP (ORDER BY price_eur) AS p25_eur,
+        ac.id AS listing_id,
+        percentile_cont(0.5) WITHIN GROUP (ORDER BY cp.price_eur) AS median_eur,
+        percentile_cont(0.25) WITHIN GROUP (ORDER BY cp.price_eur) AS p25_eur,
         COUNT(*) AS cohort_size,
-        MIN(first_seen_at) AS cohort_oldest
-      FROM active_canonical
-      GROUP BY model_id, region, year_bucket, mileage_bucket
+        MIN(cp.first_seen_at) AS cohort_oldest
+      FROM active_canonical ac
+      JOIN cohort_pool cp
+        ON cp.model_id = ac.model_id
+       AND cp.id <> ac.id
+       AND cp.year BETWEEN ac.year - 2 AND ac.year + 2
+       AND cp.mileage_km BETWEEN ac.mileage_km - 25000 AND ac.mileage_km + 25000
+      GROUP BY ac.id
+    ),
+    photo_counts AS (
+      SELECT lp.listing_id, COUNT(*)::int AS photo_count
+      FROM listing_photos lp
+      JOIN active_canonical ac ON ac.id = lp.listing_id
+      GROUP BY lp.listing_id
     )
     SELECT
       ac.id,
       ac.price_eur,
+      ac.year,
+      ac.region,
+      ac.first_seen_at,
       ca.median_eur,
       ca.p25_eur,
       ca.cohort_size,
-      ca.cohort_oldest
+      ca.cohort_oldest,
+      ld.seller_type,
+      COALESCE(pc.photo_count, 0) AS photo_count,
+      vmk.name AS make_name,
+      vm.name  AS model_name
     FROM active_canonical ac
-    JOIN cohort_agg ca USING (model_id, region, year_bucket, mileage_bucket)
-  `)) as unknown as Array<{
-    id: string | number | bigint;
-    price_eur: number;
-    median_eur: number | null;
-    p25_eur: number | null;
-    cohort_size: number | string;
-    cohort_oldest: Date | string | null;
-  }>;
+    JOIN cohort_agg ca ON ca.listing_id = ac.id
+    LEFT JOIN listing_details ld ON ld.listing_id = ac.id
+    LEFT JOIN photo_counts pc ON pc.listing_id = ac.id
+    LEFT JOIN vehicle_models vm ON vm.id = ac.model_id
+    LEFT JOIN vehicle_makes vmk ON vmk.id = vm.make_id
+  `)) as unknown as CandidateRow[];
 
   stats.candidatesScanned = candidates.length;
 
@@ -121,16 +159,17 @@ export async function computeFlipOpportunities(): Promise<FlipComputeStats> {
       continue;
     }
     if (c.median_eur == null || c.median_eur <= 0) continue;
+    if (c.p25_eur == null) continue;
 
-    const discountPct = ((c.median_eur - c.price_eur) / c.median_eur) * 100;
-    if (discountPct < MIN_DISCOUNT_PCT) {
+    // Real deal filter: must be priced below cohort p25.
+    if (c.price_eur >= c.p25_eur) {
       stats.skippedTooSmallDiscount++;
       continue;
     }
 
-    const cohortOldestMs = c.cohort_oldest
-      ? new Date(c.cohort_oldest).getTime()
-      : now;
+    const discountPct = ((c.median_eur - c.price_eur) / c.median_eur) * 100;
+
+    const cohortOldestMs = c.cohort_oldest ? new Date(c.cohort_oldest).getTime() : now;
     const cohortAgeDays = (now - cohortOldestMs) / (1000 * 60 * 60 * 24);
 
     let confidence: 'low' | 'medium' | 'high';
@@ -142,6 +181,28 @@ export async function computeFlipOpportunities(): Promise<FlipComputeStats> {
       confidence = 'low';
     }
 
+    const firstSeenMs = c.first_seen_at ? new Date(c.first_seen_at).getTime() : now;
+    const daysSinceFirstSeen = Math.max(0, (now - firstSeenMs) / (1000 * 60 * 60 * 24));
+    const photoCount = Number(c.photo_count ?? 0);
+
+    const dsInput = {
+      priceEur: c.price_eur,
+      cohortMedianEur: c.median_eur,
+      cohortSize,
+      sellerType: c.seller_type,
+      photoCount,
+      daysSinceFirstSeen,
+    };
+    const ds = computeDealScore(dsInput);
+    const explainer = buildExplainer(
+      dsInput,
+      c.make_name ?? '',
+      c.model_name ?? '',
+      c.year,
+      c.region,
+    );
+    const estProfit = estimateProfit(c.price_eur, c.median_eur, DEFAULT_RECOND_EUR);
+
     const listingId = toBigInt(c.id);
     const potentialGain = c.median_eur - c.price_eur;
 
@@ -150,11 +211,16 @@ export async function computeFlipOpportunities(): Promise<FlipComputeStats> {
       .values({
         listingId,
         marketMedianEur: String(Math.round(c.median_eur)),
-        marketP25Eur: String(Math.round(c.p25_eur ?? c.median_eur)),
+        marketP25Eur: String(Math.round(c.p25_eur)),
         discountPct: String(round2(discountPct)),
         potentialGainEur: String(Math.round(potentialGain)),
         cohortSize,
         confidence,
+        dealScore: ds.score,
+        scoreBreakdown: ds.breakdown,
+        explainer,
+        estRecondEur: DEFAULT_RECOND_EUR,
+        estProfitEur: estProfit,
       })
       .onConflictDoUpdate({
         target: flipOpportunities.listingId,
@@ -165,6 +231,11 @@ export async function computeFlipOpportunities(): Promise<FlipComputeStats> {
           potentialGainEur: sql`excluded.potential_gain_eur`,
           cohortSize: sql`excluded.cohort_size`,
           confidence: sql`excluded.confidence`,
+          dealScore: sql`excluded.deal_score`,
+          scoreBreakdown: sql`excluded.score_breakdown`,
+          explainer: sql`excluded.explainer`,
+          estRecondEur: sql`excluded.est_recond_eur`,
+          estProfitEur: sql`excluded.est_profit_eur`,
           computedAt: sql`now()`,
         },
       });
