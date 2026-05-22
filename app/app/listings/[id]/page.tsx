@@ -1,7 +1,9 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { DealBanner } from '@/components/app/listings/deal-banner';
 import { PhotoGallery } from '@/components/app/listings/photo-gallery';
 import { PriceHistoryChart } from '@/components/app/listings/price-history-chart';
+import { getDealForListing } from '@/lib/db/queries/deals';
 import { getListingById, type ListingDetailFull } from '@/lib/db/queries/listings';
 import { getPriceHistory } from '@/lib/db/queries/price-history';
 
@@ -69,7 +71,10 @@ export default async function ListingDetailPage({
   }
   const detail = await getListingById(id);
   if (!detail) notFound();
-  const priceHistory = await getPriceHistory(id);
+  const [priceHistory, deal] = await Promise.all([
+    getPriceHistory(id),
+    getDealForListing(id),
+  ]);
 
   return (
     <div className="container mx-auto px-4 py-6 sm:px-6 lg:px-8">
@@ -81,6 +86,8 @@ export default async function ListingDetailPage({
           ← Späť na zoznam
         </Link>
       </div>
+
+      {deal ? <DealBanner deal={deal} /> : null}
 
       <div className="grid gap-8 lg:grid-cols-3">
         <div className="lg:col-span-2">
