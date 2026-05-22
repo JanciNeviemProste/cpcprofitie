@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { FilterSheet, type InitialFilters } from '@/components/app/listings/v1/filter-sheet';
 import { HeroStats } from '@/components/app/listings/v1/hero-stats';
 import { ListingCard } from '@/components/app/listings/v1/listing-card';
+import { VariantSwitcher } from '@/components/app/listings/variant-switcher';
 import {
   getListings,
   getListingsStats,
@@ -149,6 +150,7 @@ export default async function ListingsV1Page({
 
   return (
     <div className="container mx-auto space-y-5 px-4 py-6 sm:px-6 lg:px-8">
+      <VariantSwitcher active="v1" />
       <HeroStats
         totalListings={stats.totalListings}
         totalPhotos={stats.totalPhotos}

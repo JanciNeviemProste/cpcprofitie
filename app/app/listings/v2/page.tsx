@@ -1,6 +1,7 @@
 import { BrandChips } from '@/components/app/listings/v2/brand-chips';
 import { FilterBar } from '@/components/app/listings/v2/filter-bar';
 import { ListingCard } from '@/components/app/listings/v2/listing-card';
+import { VariantSwitcher } from '@/components/app/listings/variant-switcher';
 import {
   getListings,
   getListingsStats,
@@ -120,6 +121,7 @@ export default async function ListingsV2Page({
 
   return (
     <div className="container mx-auto px-4 py-8 sm:px-6 lg:px-8">
+      <VariantSwitcher active="v2" />
       {/* Hero header */}
       <div className="mx-auto mb-8 flex max-w-3xl flex-col items-center gap-4 text-center">
         <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">

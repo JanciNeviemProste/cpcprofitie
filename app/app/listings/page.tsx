@@ -1,6 +1,7 @@
 import { ListingsFilterBar, type InitialFilters } from '@/components/app/listings/filter-bar';
 import { ListingsTable } from '@/components/app/listings/listings-table';
 import { Pagination } from '@/components/app/listings/pagination';
+import { VariantSwitcher } from '@/components/app/listings/variant-switcher';
 import {
   getListings,
   getListingsStats,
@@ -138,6 +139,7 @@ export default async function ListingsPage({
 
   return (
     <div className="container mx-auto px-4 py-6 sm:px-6 lg:px-8">
+      <VariantSwitcher active="v0" />
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Inzeráty</h1>

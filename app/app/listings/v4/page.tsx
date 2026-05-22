@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { V4DenseTable } from '@/components/app/listings/v4/dense-table';
 import { V4FilterRow, type V4FilterState } from '@/components/app/listings/v4/filter-popovers';
+import { VariantSwitcher } from '@/components/app/listings/variant-switcher';
 import {
   getListings,
   getListingsStats,
@@ -151,6 +152,7 @@ export default async function ListingsV4Page({
 
   return (
     <div className="mx-auto max-w-[1600px] px-3 py-3 sm:px-4">
+      <VariantSwitcher active="v4" />
       {/* Single-line header */}
       <header className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1.5">
         <h1 className="text-base font-bold tracking-tight">Inzeráty</h1>

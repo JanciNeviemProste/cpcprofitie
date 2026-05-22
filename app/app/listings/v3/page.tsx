@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { EditorialCard } from '@/components/app/listings/v3/editorial-card';
 import { SidebarFilter, type V3Filters } from '@/components/app/listings/v3/sidebar-filter';
+import { VariantSwitcher } from '@/components/app/listings/variant-switcher';
 import { Separator } from '@/components/ui/separator';
 import {
   getListings,
@@ -174,6 +175,7 @@ export default async function ListingsV3Page({
 
   return (
     <div className="container mx-auto px-4 py-10 sm:px-6 lg:px-8 lg:py-14">
+      <VariantSwitcher active="v3" />
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-[280px_1fr]">
         <SidebarFilter
           sources={stats.bySource}
