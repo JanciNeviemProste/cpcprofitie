@@ -142,11 +142,10 @@ export default async function ListingsPage({
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Inzeráty</h1>
           <p className="text-muted-foreground mt-1 text-sm tabular-nums">
-            {formatNumber(stats.totalListings)} inzerátov · {stats.bySource.length} zdroje ·{' '}
-            {formatNumber(stats.totalEnriched)} obohatených dát
+            {formatNumber(stats.totalListings)} inzerátov ·{' '}
+            {formatNumber(stats.totalPhotos)} fotiek · {stats.bySource.length} zdroje
           </p>
           <p className="text-muted-foreground mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-            <span className="font-semibold tracking-wide">ROZLOŽENIE</span>
             {stats.bySource.map((s, i) => {
               const dot = ['bg-emerald-500', 'bg-sky-500', 'bg-amber-500'][i] ?? 'bg-muted';
               return (
