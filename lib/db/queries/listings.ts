@@ -3,6 +3,7 @@
 // stay in `lib/scraping/persist.ts`.
 
 import { and, asc, desc, eq, exists, gte, ilike, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import { unstable_cache } from 'next/cache';
 import { getDb } from '../index';
 import {
   listingDetails,
@@ -351,20 +352,28 @@ export type ListingsStats = {
 
 export type RegionGroup = { name: string; count: number };
 
-export async function getRegionGroups(): Promise<RegionGroup[]> {
-  const db = getDb();
-  const results = await Promise.all(
-    SK_KRAJE.map(async (k) => {
-      const condition = or(...k.patterns.map((p) => ilike(listings.region, p)));
-      const rows = await db
-        .select({ n: sql<number>`count(*)::int` })
-        .from(listings)
-        .where(and(isNull(listings.removedAt), condition));
-      return { name: k.name, count: rows[0]?.n ?? 0 };
-    }),
-  );
-  return results;
-}
+// Cached: 8 ILIKE COUNT queries with leading-wildcard patterns can't use an
+// index, so each request fanout would stack 8 sequential seqscans over 93k
+// rows and saturate Postgres. The kraj counts only drift slowly with new
+// listings, so a 10-minute revalidation window is fine.
+export const getRegionGroups = unstable_cache(
+  async (): Promise<RegionGroup[]> => {
+    const db = getDb();
+    const results = await Promise.all(
+      SK_KRAJE.map(async (k) => {
+        const condition = or(...k.patterns.map((p) => ilike(listings.region, p)));
+        const rows = await db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(listings)
+          .where(and(isNull(listings.removedAt), condition));
+        return { name: k.name, count: rows[0]?.n ?? 0 };
+      }),
+    );
+    return results;
+  },
+  ['listings-region-groups'],
+  { revalidate: 600 },
+);
 
 export async function getDistinctRegions(): Promise<string[]> {
   const db = getDb();
@@ -378,18 +387,25 @@ export async function getDistinctRegions(): Promise<string[]> {
     .filter((v): v is string => v != null);
 }
 
-export async function getListingsStats(): Promise<ListingsStats> {
-  const db = getDb();
-  const [listingsCount, photosCount, enrichedCount, bySource] = await Promise.all([
-    db.select({ n: sql<number>`count(*)::int` }).from(listings),
-    db.select({ n: sql<number>`count(*)::int` }).from(listingPhotos),
-    db.select({ n: sql<number>`count(*)::int` }).from(listingDetails),
-    getSourceCounts(),
-  ]);
-  return {
-    totalListings: listingsCount[0]?.n ?? 0,
-    totalPhotos: photosCount[0]?.n ?? 0,
-    totalEnriched: enrichedCount[0]?.n ?? 0,
-    bySource,
-  };
-}
+// Cached: 4 COUNT queries per request was producing stacking DB load under
+// concurrent traffic. Stats values drift slowly (new listings every 6h via
+// cron), so a 10-minute window is plenty for the header strip and ROZLOŽENIE.
+export const getListingsStats = unstable_cache(
+  async (): Promise<ListingsStats> => {
+    const db = getDb();
+    const [listingsCount, photosCount, enrichedCount, bySource] = await Promise.all([
+      db.select({ n: sql<number>`count(*)::int` }).from(listings),
+      db.select({ n: sql<number>`count(*)::int` }).from(listingPhotos),
+      db.select({ n: sql<number>`count(*)::int` }).from(listingDetails),
+      getSourceCounts(),
+    ]);
+    return {
+      totalListings: listingsCount[0]?.n ?? 0,
+      totalPhotos: photosCount[0]?.n ?? 0,
+      totalEnriched: enrichedCount[0]?.n ?? 0,
+      bySource,
+    };
+  },
+  ['listings-stats'],
+  { revalidate: 600 },
+);
