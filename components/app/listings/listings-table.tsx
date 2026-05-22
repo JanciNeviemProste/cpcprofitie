@@ -54,66 +54,72 @@ export function ListingsTable({ rows }: { rows: ListingRow[] }) {
         <table className="w-full text-sm">
           <thead className="bg-muted/60 text-muted-foreground sticky top-0 z-10 text-left text-xs uppercase backdrop-blur">
             <tr>
-              <th className="px-3 py-2 w-24">Foto</th>
-              <th className="px-3 py-2">Inzerát</th>
-              <th className="px-3 py-2 text-right">Rok</th>
-              <th className="px-3 py-2 text-right">Km</th>
-              <th className="px-3 py-2">Palivo</th>
-              <th className="px-3 py-2 text-right">Cena</th>
-              <th className="px-3 py-2">Región</th>
-              <th className="px-3 py-2">Zdroj</th>
+              <th className="px-4 py-2.5 w-24">Foto</th>
+              <th className="px-4 py-2.5">Inzerát</th>
+              <th className="px-4 py-2.5 text-right">Rok</th>
+              <th className="px-4 py-2.5 text-right">Km</th>
+              <th className="px-4 py-2.5">Palivo</th>
+              <th className="px-4 py-2.5 text-right">Cena</th>
+              <th className="px-4 py-2.5">Región</th>
+              <th className="px-4 py-2.5">Zdroj</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => {
               const href = `/app/listings/${r.id.toString()}`;
+              const make = r.makeName;
+              const model = r.modelName;
+              const subtitle =
+                make && model ? `${make} ${model}` : make ?? model ?? null;
               return (
                 <tr
                   key={r.id.toString()}
-                  className="border-border/40 even:bg-muted/10 hover:bg-muted/30 border-t transition-colors"
+                  className="border-border/40 hover:bg-muted/40 border-t transition-colors"
                 >
-                  <td className="px-3 py-2">
-                    <Link href={href}>
+                  <td className="px-4 py-3">
+                    <Link
+                      href={href}
+                      className="bg-muted relative block aspect-[4/3] w-24 overflow-hidden rounded-lg"
+                    >
                       {r.heroPhotoUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={r.heroPhotoUrl}
                           alt=""
                           loading="lazy"
-                          width={96}
-                          height={64}
-                          className="border-border/40 h-16 w-24 rounded-md border object-cover"
+                          className="absolute inset-0 h-full w-full object-cover"
                         />
-                      ) : (
-                        <div className="border-border/40 bg-muted h-16 w-24 rounded-md border" />
-                      )}
+                      ) : null}
                     </Link>
                   </td>
-                  <td className="px-3 py-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Link href={href} className="font-medium hover:underline">
-                        {title(r)}
-                      </Link>
-                      {r.isFeatured ? (
-                        <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
-                          🔥 Featured
-                        </span>
-                      ) : null}
-                      {r.viewCount != null && r.viewCount > 100 ? (
-                        <span className="text-xs text-muted-foreground tabular-nums">
-                          {r.viewCount.toLocaleString('sk-SK')} zobrazení
-                        </span>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-col gap-0.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Link
+                          href={href}
+                          className="text-foreground font-medium hover:underline"
+                        >
+                          {title(r)}
+                        </Link>
+                        {r.isFeatured ? (
+                          <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
+                            Featured
+                          </span>
+                        ) : null}
+                      </div>
+                      {subtitle ? (
+                        <span className="text-muted-foreground text-sm">{subtitle}</span>
                       ) : null}
                     </div>
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums">{r.year ?? '—'}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{formatKm(r.mileageKm)}</td>
-                  <td className="px-3 py-2">{formatFuel(r.fuel)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums font-medium">
+                  <td className="px-4 py-3 text-right tabular-nums">{r.year ?? '—'}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">{formatKm(r.mileageKm)}</td>
+                  <td className="px-4 py-3">{formatFuel(r.fuel)}</td>
+                  <td className="text-foreground px-4 py-3 text-right font-semibold tabular-nums">
                     {formatPrice(r.priceEur)}
                   </td>
-                  <td className="px-3 py-2 text-muted-foreground">{r.region ?? '—'}</td>
-                  <td className="px-3 py-2">
+                  <td className="text-muted-foreground px-4 py-3">{r.region ?? '—'}</td>
+                  <td className="px-4 py-3">
                     <span className="border-border/60 text-muted-foreground rounded border px-2 py-0.5 text-xs">
                       {sourceBadge(r.source)}
                     </span>

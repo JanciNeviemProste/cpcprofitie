@@ -2,19 +2,13 @@ import { ListingsFilterBar, type InitialFilters } from '@/components/app/listing
 import { ListingsTable } from '@/components/app/listings/listings-table';
 import { Pagination } from '@/components/app/listings/pagination';
 import {
-  getDistinctRegions,
   getListings,
   getListingsStats,
+  getRegionGroups,
   type ListingFilters,
   type ListingsSort,
 } from '@/lib/db/queries/listings';
 import type { RawFuel, Source } from '@/lib/scraping/types';
-
-const SOURCE_COLORS: Record<string, string> = {
-  'autobazar.eu': 'bg-blue-500',
-  'bazos.sk': 'bg-emerald-500',
-  'autobazar.sk': 'bg-amber-500',
-};
 
 const KNOWN_SOURCES: Source[] = ['autobazar.sk', 'autobazar.eu', 'bazos.sk'];
 const KNOWN_FUELS: RawFuel[] = [
@@ -75,7 +69,8 @@ export default async function ListingsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
-  const [stats, regions] = await Promise.all([getListingsStats(), getDistinctRegions()]);
+  const [stats, regionGroups] = await Promise.all([getListingsStats(), getRegionGroups()]);
+  const regionNames = regionGroups.map((g) => g.name);
 
   const pageRaw = typeof sp.page === 'string' ? Number(sp.page) : 1;
   const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
@@ -90,7 +85,7 @@ export default async function ListingsPage({
     ? regionsCsv
         .split(',')
         .map((s) => s.trim())
-        .filter((s) => s.length > 0 && regions.includes(s))
+        .filter((s) => s.length > 0 && regionNames.includes(s))
     : [];
 
   const minPrice = parseInt0(pickStr(sp.minPrice), 0, 10_000_000);
@@ -141,16 +136,14 @@ export default async function ListingsPage({
     sort,
   };
 
-  const photosPerListing =
-    stats.totalListings > 0 ? Math.round(stats.totalPhotos / stats.totalListings) : 0;
-
   return (
     <div className="container mx-auto px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Inzeráty</h1>
-          <p className="text-muted-foreground mt-1 text-sm">
-            Naživo zhromaždené dáta zo slovenských autobazárov.
+          <p className="text-muted-foreground mt-1 text-sm tabular-nums">
+            {formatNumber(stats.totalListings)} inzerátov · {stats.bySource.length} zdroje ·{' '}
+            {formatNumber(stats.totalEnriched)} obohatených dát
           </p>
         </div>
         <span className="border-border/60 bg-card/40 text-muted-foreground rounded-full border px-3 py-1 text-xs">
@@ -160,68 +153,10 @@ export default async function ListingsPage({
         </span>
       </div>
 
-      <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <div className="border-border/60 from-primary/5 relative overflow-hidden rounded-xl border bg-gradient-to-br to-transparent p-5">
-          <div className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
-            Inzerátov
-          </div>
-          <div className="mt-2 text-4xl font-bold tabular-nums tracking-tight">
-            {formatNumber(stats.totalListings)}
-          </div>
-          <div className="text-muted-foreground mt-1 text-xs">aktívne na trhu</div>
-        </div>
-
-        <div className="border-border/60 relative overflow-hidden rounded-xl border bg-gradient-to-br from-blue-500/5 to-transparent p-5">
-          <div className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
-            Fotografií
-          </div>
-          <div className="mt-2 text-4xl font-bold tabular-nums tracking-tight">
-            {formatNumber(stats.totalPhotos)}
-          </div>
-          <div className="text-muted-foreground mt-1 text-xs">
-            ~{photosPerListing} na inzerát
-          </div>
-        </div>
-
-        <div className="border-border/60 relative overflow-hidden rounded-xl border bg-gradient-to-br from-emerald-500/5 to-transparent p-5">
-          <div className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
-            Enriched
-          </div>
-          <div className="mt-2 text-4xl font-bold tabular-nums tracking-tight">
-            {formatNumber(stats.totalEnriched)}
-          </div>
-          <div className="text-muted-foreground mt-1 text-xs">s VIN + výbavou</div>
-        </div>
-
-        <div className="border-border/60 relative overflow-hidden rounded-xl border bg-gradient-to-br from-amber-500/5 to-transparent p-5">
-          <div className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
-            Zdroje
-          </div>
-          <div className="mt-2 text-4xl font-bold tabular-nums tracking-tight">
-            {stats.bySource.length}
-          </div>
-          <div className="text-muted-foreground mt-1 text-xs">SK autobazáre</div>
-        </div>
-      </div>
-
-      <div className="border-border/60 mb-6 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border px-4 py-3 text-sm">
-        <span className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
-          Rozloženie
-        </span>
-        {stats.bySource.map((s) => (
-          <span key={s.source} className="flex items-center gap-2">
-            <span
-              className={`h-2 w-2 rounded-full ${SOURCE_COLORS[s.source] ?? 'bg-muted-foreground'}`}
-            />
-            <span className="text-muted-foreground">{s.source}</span>
-            <span className="font-semibold tabular-nums">{formatNumber(s.count)}</span>
-          </span>
-        ))}
-      </div>
       <div className="mb-4">
         <ListingsFilterBar
           sources={stats.bySource}
-          regions={regions}
+          regions={regionNames}
           initialFilters={initialFilters}
         />
       </div>

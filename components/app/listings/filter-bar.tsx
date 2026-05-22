@@ -1,6 +1,7 @@
 'use client';
 
 import { Slider } from '@base-ui/react/slider';
+import { ChevronDown } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import type { RawFuel, Source } from '@/lib/scraping/types';
@@ -25,6 +26,7 @@ export type InitialFilters = {
 
 type Props = {
   sources: SourceCount[];
+  /** Kraj names (from getRegionGroups). */
   regions: string[];
   initialFilters: InitialFilters;
 };
@@ -88,10 +90,10 @@ function buildParams(state: InitialFilters): URLSearchParams {
 
 function RangeSlider({
   label,
+  value,
   min,
   max,
   step,
-  value,
   onChange,
   formatValue,
 }: {
@@ -105,11 +107,11 @@ function RangeSlider({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
+      <div className="flex items-baseline justify-between gap-2">
         <label className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
           {label}
         </label>
-        <span className="text-xs tabular-nums">
+        <span className="text-foreground text-sm font-medium tabular-nums">
           {formatValue(value[0])} – {formatValue(value[1])}
         </span>
       </div>
@@ -136,50 +138,45 @@ function RangeSlider({
   );
 }
 
-function CheckboxGroup<T extends string>({
-  label,
+function ChipGroup<T extends string>({
   options,
   selected,
   onToggle,
   counts,
 }: {
-  label: string;
   options: { value: T; label: string }[];
   selected: T[];
   onToggle: (v: T) => void;
   counts?: Record<string, number>;
 }) {
   return (
-    <div className="flex flex-col gap-2">
-      <label className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
-        {label}
-      </label>
-      <div className="flex flex-wrap gap-2">
-        {options.map((o) => {
-          const active = selected.includes(o.value);
-          const count = counts?.[o.value];
-          return (
-            <button
-              key={o.value}
-              type="button"
-              onClick={() => onToggle(o.value)}
-              className={
-                'inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-xs transition-colors ' +
-                (active
-                  ? 'border-primary bg-primary text-primary-foreground'
-                  : 'border-border/60 bg-background hover:border-primary/40 hover:bg-muted/50')
-              }
-            >
-              <span>{o.label}</span>
-              {count != null && (
-                <span className={'tabular-nums ' + (active ? 'opacity-80' : 'text-muted-foreground')}>
-                  {count.toLocaleString('sk-SK')}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+    <div className="flex flex-wrap gap-2">
+      {options.map((o) => {
+        const active = selected.includes(o.value);
+        const count = counts?.[o.value];
+        return (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => onToggle(o.value)}
+            className={
+              'inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-xs transition-colors ' +
+              (active
+                ? 'border-primary bg-primary text-primary-foreground'
+                : 'border-border/60 bg-background hover:border-primary/40 hover:bg-muted/50')
+            }
+          >
+            <span>{o.label}</span>
+            {count != null && (
+              <span
+                className={'tabular-nums ' + (active ? 'opacity-80' : 'text-muted-foreground')}
+              >
+                {count.toLocaleString('sk-SK')}
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -190,6 +187,7 @@ export function ListingsFilterBar({ sources, regions, initialFilters }: Props) {
   const [, startTransition] = useTransition();
 
   const [state, setState] = useState<InitialFilters>(initialFilters);
+  const [expanded, setExpanded] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isFirst = useRef(true);
 
@@ -252,31 +250,23 @@ export function ListingsFilterBar({ sources, regions, initialFilters }: Props) {
     push(state);
   }
 
-  const content = (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-      {/* Search */}
-      <div className="flex flex-col gap-2">
-        <label className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
-          Hľadať
-        </label>
+  return (
+    <div className="border-border/40 bg-card/40 sticky top-16 z-20 rounded-2xl border p-5 shadow-sm backdrop-blur-sm">
+      {/* Compact bar — always visible */}
+      <div className="flex flex-wrap items-center gap-2">
         <input
           type="search"
           value={state.q ?? ''}
           onChange={(e) => setState((s) => ({ ...s, q: e.target.value }))}
-          placeholder="napr. Octavia"
-          className="border-border/60 bg-background h-9 w-full rounded-md border px-3 text-sm"
+          placeholder="Hľadať (napr. Octavia)"
+          className="border-border/60 bg-background h-9 min-w-[180px] flex-1 rounded-md border px-3 text-sm"
         />
-      </div>
 
-      {/* Sort */}
-      <div className="flex flex-col gap-2">
-        <label className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
-          Zoradiť
-        </label>
         <select
           value={state.sort ?? 'newest'}
           onChange={(e) => setState((s) => ({ ...s, sort: e.target.value }))}
-          className="border-border/60 bg-background h-9 w-full rounded-md border px-2 text-sm"
+          className="border-border/60 bg-background h-9 rounded-md border px-2 text-sm"
+          aria-label="Zoradiť"
         >
           {SORT_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
@@ -284,162 +274,158 @@ export function ListingsFilterBar({ sources, regions, initialFilters }: Props) {
             </option>
           ))}
         </select>
-      </div>
 
-      {/* Toggles */}
-      <div className="flex flex-col gap-2">
-        <label className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
-          Možnosti
-        </label>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setState((s) => ({ ...s, hasPhoto: !s.hasPhoto }))}
-            className={
-              'inline-flex h-9 items-center rounded-md border px-3 text-xs transition-colors ' +
-              (state.hasPhoto
-                ? 'border-primary bg-primary text-primary-foreground'
-                : 'border-border/60 bg-background hover:bg-muted/50')
-            }
-          >
-            Len s fotkou
-          </button>
-          <button
-            type="button"
-            onClick={() => setState((s) => ({ ...s, featuredOnly: !s.featuredOnly }))}
-            className={
-              'inline-flex h-9 items-center rounded-md border px-3 text-xs transition-colors ' +
-              (state.featuredOnly
-                ? 'border-primary bg-primary text-primary-foreground'
-                : 'border-border/60 bg-background hover:bg-muted/50')
-            }
-          >
-            Len zvýraznené
-          </button>
-        </div>
-      </div>
+        <button
+          type="button"
+          onClick={() => setState((s) => ({ ...s, hasPhoto: !s.hasPhoto }))}
+          className={
+            'inline-flex h-9 items-center rounded-md border px-3 text-xs transition-colors ' +
+            (state.hasPhoto
+              ? 'border-primary bg-primary text-primary-foreground'
+              : 'border-border/60 bg-background hover:bg-muted/50')
+          }
+        >
+          Len s fotkou
+        </button>
+        <button
+          type="button"
+          onClick={() => setState((s) => ({ ...s, featuredOnly: !s.featuredOnly }))}
+          className={
+            'inline-flex h-9 items-center rounded-md border px-3 text-xs transition-colors ' +
+            (state.featuredOnly
+              ? 'border-primary bg-primary text-primary-foreground'
+              : 'border-border/60 bg-background hover:bg-muted/50')
+          }
+        >
+          Featured
+        </button>
 
-      {/* Price range */}
-      <RangeSlider
-        label="Cena (€)"
-        min={PRICE_MIN}
-        max={PRICE_MAX}
-        step={500}
-        value={[state.minPrice ?? PRICE_MIN, state.maxPrice ?? PRICE_MAX]}
-        onChange={([a, b]) =>
-          setState((s) => ({
-            ...s,
-            minPrice: a === PRICE_MIN ? undefined : a,
-            maxPrice: b === PRICE_MAX ? undefined : b,
-          }))
-        }
-        formatValue={(n) => `${fmt(n)} €`}
-      />
-
-      {/* Year range */}
-      <RangeSlider
-        label="Rok výroby"
-        min={YEAR_MIN}
-        max={YEAR_MAX}
-        step={1}
-        value={[state.minYear ?? YEAR_MIN, state.maxYear ?? YEAR_MAX]}
-        onChange={([a, b]) =>
-          setState((s) => ({
-            ...s,
-            minYear: a === YEAR_MIN ? undefined : a,
-            maxYear: b === YEAR_MAX ? undefined : b,
-          }))
-        }
-        formatValue={(n) => String(n)}
-      />
-
-      {/* Km range */}
-      <RangeSlider
-        label="Najazdené (km)"
-        min={KM_MIN}
-        max={KM_MAX}
-        step={5000}
-        value={[state.minKm ?? KM_MIN, state.maxKm ?? KM_MAX]}
-        onChange={([a, b]) =>
-          setState((s) => ({
-            ...s,
-            minKm: a === KM_MIN ? undefined : a,
-            maxKm: b === KM_MAX ? undefined : b,
-          }))
-        }
-        formatValue={(n) => fmt(n)}
-      />
-
-      {/* Source multi-select */}
-      <div className="md:col-span-2 lg:col-span-3">
-        <CheckboxGroup
-          label="Zdroj"
-          options={SOURCE_OPTIONS}
-          selected={state.sources}
-          onToggle={(v) => setState((s) => ({ ...s, sources: toggle(s.sources, v) }))}
-          counts={sourceCounts}
-        />
-      </div>
-
-      {/* Fuel multi-select */}
-      <div className="md:col-span-2 lg:col-span-3">
-        <CheckboxGroup
-          label="Palivo"
-          options={FUEL_OPTIONS}
-          selected={state.fuel}
-          onToggle={(v) => setState((s) => ({ ...s, fuel: toggle(s.fuel, v) }))}
-        />
-      </div>
-
-      {/* Regions multi-select */}
-      {regions.length > 0 && (
-        <div className="md:col-span-2 lg:col-span-3">
-          <CheckboxGroup
-            label="Región"
-            options={regions.map((r) => ({ value: r, label: r }))}
-            selected={state.regions}
-            onToggle={(v) => setState((s) => ({ ...s, regions: toggle(s.regions, v) }))}
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="border-border/60 hover:bg-muted/50 inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-xs font-medium"
+        >
+          Rozšírené filtre
+          <ChevronDown
+            className={'h-3.5 w-3.5 transition-transform ' + (expanded ? 'rotate-180' : '')}
           />
+        </button>
+      </div>
+
+      {/* Expanded section */}
+      {expanded && (
+        <div className="border-border/40 mt-5 space-y-5 border-t pt-5">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+            <RangeSlider
+              label="Cena (€)"
+              min={PRICE_MIN}
+              max={PRICE_MAX}
+              step={500}
+              value={[state.minPrice ?? PRICE_MIN, state.maxPrice ?? PRICE_MAX]}
+              onChange={([a, b]) =>
+                setState((s) => ({
+                  ...s,
+                  minPrice: a === PRICE_MIN ? undefined : a,
+                  maxPrice: b === PRICE_MAX ? undefined : b,
+                }))
+              }
+              formatValue={(n) => `${fmt(n)} €`}
+            />
+            <RangeSlider
+              label="Rok výroby"
+              min={YEAR_MIN}
+              max={YEAR_MAX}
+              step={1}
+              value={[state.minYear ?? YEAR_MIN, state.maxYear ?? YEAR_MAX]}
+              onChange={([a, b]) =>
+                setState((s) => ({
+                  ...s,
+                  minYear: a === YEAR_MIN ? undefined : a,
+                  maxYear: b === YEAR_MAX ? undefined : b,
+                }))
+              }
+              formatValue={(n) => String(n)}
+            />
+            <RangeSlider
+              label="Najazdené (km)"
+              min={KM_MIN}
+              max={KM_MAX}
+              step={5000}
+              value={[state.minKm ?? KM_MIN, state.maxKm ?? KM_MAX]}
+              onChange={([a, b]) =>
+                setState((s) => ({
+                  ...s,
+                  minKm: a === KM_MIN ? undefined : a,
+                  maxKm: b === KM_MAX ? undefined : b,
+                }))
+              }
+              formatValue={(n) => fmt(n)}
+            />
+          </div>
+
+          {/* Source + Fuel — one line */}
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
+                Zdroj
+              </span>
+              <ChipGroup
+                options={SOURCE_OPTIONS}
+                selected={state.sources}
+                onToggle={(v) =>
+                  setState((s) => ({ ...s, sources: toggle(s.sources, v) }))
+                }
+                counts={sourceCounts}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
+                Palivo
+              </span>
+              <ChipGroup
+                options={FUEL_OPTIONS}
+                selected={state.fuel}
+                onToggle={(v) => setState((s) => ({ ...s, fuel: toggle(s.fuel, v) }))}
+              />
+            </div>
+          </div>
+
+          {/* Region — 8 kraj chips */}
+          {regions.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <span className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
+                Región
+              </span>
+              <ChipGroup
+                options={regions.map((r) => ({ value: r, label: r }))}
+                selected={state.regions}
+                onToggle={(v) =>
+                  setState((s) => ({ ...s, regions: toggle(s.regions, v) }))
+                }
+              />
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="border-border/40 flex items-center gap-2 border-t pt-4">
+            <button
+              type="button"
+              onClick={applyNow}
+              className="bg-primary text-primary-foreground hover:bg-primary/90 h-9 rounded-md px-4 text-sm font-medium"
+            >
+              Použiť
+            </button>
+            <button
+              type="button"
+              onClick={reset}
+              className="border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted/50 h-9 rounded-md border px-3 text-sm"
+            >
+              Reset
+            </button>
+          </div>
         </div>
       )}
-
-      {/* Actions */}
-      <div className="flex items-center gap-2 md:col-span-2 lg:col-span-3">
-        <button
-          type="button"
-          onClick={applyNow}
-          className="bg-primary text-primary-foreground hover:bg-primary/90 h-9 rounded-md px-4 text-sm font-medium"
-        >
-          Použiť filter
-        </button>
-        <button
-          type="button"
-          onClick={reset}
-          className="border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted/50 h-9 rounded-md border px-3 text-sm"
-        >
-          Resetovať
-        </button>
-      </div>
     </div>
-  );
-
-  return (
-    <>
-      {/* Desktop: sticky panel */}
-      <div className="border-border/40 bg-card/30 sticky top-16 z-10 hidden rounded-xl border p-4 backdrop-blur md:block">
-        {content}
-      </div>
-
-      {/* Mobile: collapsible */}
-      <details className="border-border/40 bg-card/30 group rounded-xl border md:hidden">
-        <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-medium">
-          <span>Filtre</span>
-          <span className="text-muted-foreground text-xs transition-transform group-open:rotate-180">
-            ▾
-          </span>
-        </summary>
-        <div className="border-border/40 border-t p-4">{content}</div>
-      </details>
-    </>
   );
 }

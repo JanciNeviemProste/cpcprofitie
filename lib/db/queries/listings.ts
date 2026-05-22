@@ -2,7 +2,7 @@
 // UI to paginate over scraped inventory. No write paths live here — those
 // stay in `lib/scraping/persist.ts`.
 
-import { and, asc, desc, eq, exists, gte, ilike, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, exists, gte, ilike, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { getDb } from '../index';
 import {
   listingDetails,
@@ -11,6 +11,7 @@ import {
   vehicleMakes,
   vehicleModels,
 } from '../schema';
+import { SK_KRAJE, krajByName } from '@/lib/data/sk-regions';
 import type { RawFuel, RawTransmission, Source } from '@/lib/scraping/types';
 
 export type ListingsSort = 'newest' | 'oldest' | 'price-asc' | 'price-desc';
@@ -110,7 +111,20 @@ function buildWhere(filters: ListingFilters | undefined) {
       }
     }
     if (filters.regions && filters.regions.length > 0) {
-      parts.push(inArray(listings.region, filters.regions));
+      // Treat filters.regions as kraj names (Bratislavský, Žilinský, …).
+      // Each kraj fans out into multiple ILIKE patterns OR'd together;
+      // selected kraje are then OR'd with each other.
+      const krajConditions = filters.regions
+        .map((n) => krajByName(n))
+        .filter((k): k is (typeof SK_KRAJE)[number] => Boolean(k))
+        .map((k) =>
+          or(...k.patterns.map((p) => ilike(listings.region, p))),
+        )
+        .filter((c): c is NonNullable<typeof c> => c != null);
+      if (krajConditions.length > 0) {
+        const combined = or(...krajConditions);
+        if (combined) parts.push(combined);
+      }
     }
     if (filters.hasPhoto === true) {
       parts.push(
@@ -334,6 +348,23 @@ export type ListingsStats = {
   totalEnriched: number;
   bySource: SourceCount[];
 };
+
+export type RegionGroup = { name: string; count: number };
+
+export async function getRegionGroups(): Promise<RegionGroup[]> {
+  const db = getDb();
+  const results = await Promise.all(
+    SK_KRAJE.map(async (k) => {
+      const condition = or(...k.patterns.map((p) => ilike(listings.region, p)));
+      const rows = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(listings)
+        .where(and(isNull(listings.removedAt), condition));
+      return { name: k.name, count: rows[0]?.n ?? 0 };
+    }),
+  );
+  return results;
+}
 
 export async function getDistinctRegions(): Promise<string[]> {
   const db = getDb();
