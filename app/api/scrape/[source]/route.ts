@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { isAdminEmail } from '@/lib/auth/admin';
 import { getCurrentUser } from '@/lib/auth/server';
 import { isSameOrigin } from '@/lib/auth/csrf';
 import {
@@ -18,13 +19,6 @@ const BodySchema = z.object({
   pages: z.coerce.number().int().min(1).max(20).default(1),
 });
 
-function parseAdminAllowlist(): string[] {
-  return (process.env.ADMIN_EMAILS ?? '')
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter((s) => s.length > 0);
-}
-
 type Ctx = { params: Promise<{ source: string }> };
 
 export async function POST(request: Request, ctx: Ctx) {
@@ -35,8 +29,7 @@ export async function POST(request: Request, ctx: Ctx) {
   if (!user?.email) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
-  const allowlist = parseAdminAllowlist();
-  if (allowlist.length === 0 || !allowlist.includes(user.email.toLowerCase())) {
+  if (!isAdminEmail(user.email)) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   }
 

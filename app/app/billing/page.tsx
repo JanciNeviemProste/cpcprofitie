@@ -3,6 +3,7 @@ import { ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { getCurrentUser } from '@/lib/auth/server';
 import { effectivePlan, getUserSubscription } from '@/lib/billing/subscription';
+import { getUsageSummary } from '@/lib/billing/usage';
 import { PLANS } from '@/lib/billing/plans';
 import { isStripeConfigured } from '@/lib/stripe/server';
 
@@ -10,16 +11,18 @@ export const metadata = { title: 'Predplatné' };
 
 export default async function BillingPage() {
   const user = await getCurrentUser();
-  const sub = user ? await getUserSubscription(user.id) : null;
+  const [sub, usage] = user
+    ? await Promise.all([getUserSubscription(user.id), getUsageSummary(user.id)])
+    : [null, { aiListingsThisMonth: 0, watchlistCount: 0, garageCount: 0 }];
   const planId = effectivePlan(sub);
   const plan = PLANS[planId];
   const stripeReady = isStripeConfigured();
   const hasCustomer = Boolean(sub?.stripeCustomerId);
 
   const quotas = [
-    { label: 'AI inzeráty', used: 0, limit: plan.quotas.aiListingsPerMonth },
-    { label: 'Sledované modely', used: 0, limit: plan.quotas.watchlistEntries },
-    { label: 'Garáž', used: 0, limit: plan.quotas.garageEntries },
+    { label: 'AI inzeráty', used: usage.aiListingsThisMonth, limit: plan.quotas.aiListingsPerMonth },
+    { label: 'Sledované modely', used: usage.watchlistCount, limit: plan.quotas.watchlistEntries },
+    { label: 'Garáž', used: usage.garageCount, limit: plan.quotas.garageEntries },
   ];
 
   return (

@@ -10,7 +10,7 @@ export const maxDuration = 300;
 
 const PROD = process.env.VERCEL_ENV === 'production';
 
-export async function POST(request: Request) {
+export async function GET(request: Request) {
   const expected = process.env.CRON_SECRET;
   if (!expected) {
     if (PROD) return NextResponse.json({ error: 'cron_secret_unset' }, { status: 503 });
@@ -53,3 +53,6 @@ export async function POST(request: Request) {
     );
   }
 }
+
+// Vercel Cron invokes cron paths via GET; keep POST for manual/scripted runs.
+export const POST = GET;

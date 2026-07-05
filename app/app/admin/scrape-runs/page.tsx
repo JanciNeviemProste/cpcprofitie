@@ -1,48 +1,27 @@
+import { notFound } from 'next/navigation';
 import { CheckCircle2, Clock, XCircle } from 'lucide-react';
 import { formatNumber } from '@/components/app/kpi-card';
+import { isAdminEmail } from '@/lib/auth/admin';
+import { getCurrentUser } from '@/lib/auth/server';
+import {
+  getRecentScrapeRuns,
+  summarizeRuns,
+  type ScrapeRunRow,
+} from '@/lib/db/queries/scrape-runs';
 
 export const metadata = { title: 'Admin · Scrape behy' };
+export const dynamic = 'force-dynamic';
 
-type Status = 'succeeded' | 'failed' | 'running';
+type Status = ScrapeRunRow['status'];
 
-type Run = {
-  id: number;
-  source: string;
-  status: Status;
-  startedAt: Date;
-  durationMs: number;
-  listingsAdded: number;
-  listingsUpdated: number;
-  errorMessage?: string;
-};
+export default async function ScrapeRunsAdminPage() {
+  const user = await getCurrentUser();
+  if (!isAdminEmail(user?.email)) {
+    notFound();
+  }
 
-function mockRuns(): Run[] {
-  const sources = ['autobazar.sk', 'mobile.de', 'autoscout24'];
-  const now = Date.now();
-  return Array.from({ length: 18 }, (_, i) => {
-    const status: Status =
-      i === 0 ? 'running' : i === 5 ? 'failed' : 'succeeded';
-    return {
-      id: 1000 - i,
-      source: sources[i % sources.length]!,
-      status,
-      startedAt: new Date(now - i * 6 * 60 * 60 * 1000),
-      durationMs: status === 'running' ? 0 : 90_000 + ((i * 7919) % 280_000),
-      listingsAdded: status === 'failed' ? 0 : 80 + ((i * 31) % 320),
-      listingsUpdated: status === 'failed' ? 0 : 1200 + ((i * 53) % 800),
-      errorMessage:
-        status === 'failed'
-          ? 'HTTP 429 from upstream — backoff scheduled for next window'
-          : undefined,
-    };
-  });
-}
-
-export default function ScrapeRunsAdminPage() {
-  const runs = mockRuns();
-  const succeeded = runs.filter((r) => r.status === 'succeeded').length;
-  const failed = runs.filter((r) => r.status === 'failed').length;
-  const totalAdded = runs.reduce((s, r) => s + r.listingsAdded, 0);
+  const runs = await getRecentScrapeRuns(30);
+  const { succeeded24h: succeeded, failed24h: failed, totalAdded } = summarizeRuns(runs);
 
   return (
     <div className="container mx-auto px-4 py-10 sm:px-6 lg:px-8">
@@ -52,7 +31,7 @@ export default function ScrapeRunsAdminPage() {
         </p>
         <h1 className="text-3xl font-bold tracking-tight">Scrape behy</h1>
         <p className="text-muted-foreground text-sm">
-          Posledných 18 behov per zdroj. Demo dáta pred prvým produkčným cron behom.
+          Posledných {runs.length} behov zo všetkých zdrojov.
         </p>
       </div>
 
@@ -62,50 +41,63 @@ export default function ScrapeRunsAdminPage() {
         <Stat label="Pridaných listingov" value={formatNumber(totalAdded)} />
       </div>
 
-      <div className="border-border/40 mt-10 overflow-hidden rounded-xl border">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/30 text-muted-foreground text-xs uppercase tracking-wider">
-            <tr>
-              <th className="px-4 py-3 text-left font-medium">ID</th>
-              <th className="px-4 py-3 text-left font-medium">Zdroj</th>
-              <th className="px-4 py-3 text-left font-medium">Stav</th>
-              <th className="px-4 py-3 text-left font-medium">Začiatok</th>
-              <th className="px-4 py-3 text-right font-medium">Trvanie</th>
-              <th className="px-4 py-3 text-right font-medium">+ Listingy</th>
-              <th className="px-4 py-3 text-right font-medium">↻ Aktualizácie</th>
-            </tr>
-          </thead>
-          <tbody>
-            {runs.map((r) => (
-              <tr key={r.id} className="border-border/40 border-t">
-                <td className="text-muted-foreground px-4 py-3 font-mono text-xs">#{r.id}</td>
-                <td className="px-4 py-3 font-medium">{r.source}</td>
-                <td className="px-4 py-3">
-                  <StatusBadge status={r.status} />
-                  {r.errorMessage && (
-                    <p className="text-destructive mt-1 text-xs">{r.errorMessage}</p>
-                  )}
-                </td>
-                <td className="text-muted-foreground px-4 py-3 text-xs">
-                  {r.startedAt.toLocaleString('sk-SK', {
-                    dateStyle: 'short',
-                    timeStyle: 'short',
-                  })}
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums">
-                  {r.status === 'running' ? '—' : `${(r.durationMs / 1000).toFixed(1)} s`}
-                </td>
-                <td className="text-chart-3 px-4 py-3 text-right font-medium tabular-nums">
-                  {r.listingsAdded > 0 ? `+${formatNumber(r.listingsAdded)}` : '—'}
-                </td>
-                <td className="text-muted-foreground px-4 py-3 text-right tabular-nums">
-                  {r.listingsUpdated > 0 ? formatNumber(r.listingsUpdated) : '—'}
-                </td>
+      {runs.length === 0 ? (
+        <div className="border-border/40 bg-card/30 mt-10 rounded-xl border p-10 text-center">
+          <p className="text-muted-foreground text-sm">
+            Zatiaľ žiadne behy — tabuľka sa naplní po najbližšom cron behu.
+          </p>
+        </div>
+      ) : (
+        <div className="border-border/40 mt-10 overflow-hidden rounded-xl border">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/30 text-muted-foreground text-xs uppercase tracking-wider">
+              <tr>
+                <th className="px-4 py-3 text-left font-medium">ID</th>
+                <th className="px-4 py-3 text-left font-medium">Zdroj</th>
+                <th className="px-4 py-3 text-left font-medium">Stav</th>
+                <th className="px-4 py-3 text-left font-medium">Začiatok</th>
+                <th className="px-4 py-3 text-right font-medium">Trvanie</th>
+                <th className="px-4 py-3 text-right font-medium">+ Listingy</th>
+                <th className="px-4 py-3 text-right font-medium">↻ Aktualizácie</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {runs.map((r) => {
+                const durationMs = r.finishedAt
+                  ? r.finishedAt.getTime() - r.startedAt.getTime()
+                  : null;
+                return (
+                  <tr key={r.id} className="border-border/40 border-t">
+                    <td className="text-muted-foreground px-4 py-3 font-mono text-xs">#{r.id}</td>
+                    <td className="px-4 py-3 font-medium">{r.source}</td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={r.status} />
+                      {r.errorMessage && (
+                        <p className="text-destructive mt-1 text-xs">{r.errorMessage}</p>
+                      )}
+                    </td>
+                    <td className="text-muted-foreground px-4 py-3 text-xs">
+                      {r.startedAt.toLocaleString('sk-SK', {
+                        dateStyle: 'short',
+                        timeStyle: 'short',
+                      })}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      {durationMs != null ? `${(durationMs / 1000).toFixed(1)} s` : '—'}
+                    </td>
+                    <td className="text-chart-3 px-4 py-3 text-right font-medium tabular-nums">
+                      {r.listingsAdded > 0 ? `+${formatNumber(r.listingsAdded)}` : '—'}
+                    </td>
+                    <td className="text-muted-foreground px-4 py-3 text-right tabular-nums">
+                      {r.listingsUpdated > 0 ? formatNumber(r.listingsUpdated) : '—'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -130,7 +122,7 @@ function StatusBadge({ status }: { status: Status }) {
   return (
     <span className="bg-primary/15 text-primary inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium">
       <Clock className="size-3 animate-pulse" />
-      Beží
+      {status === 'queued' ? 'Čaká' : 'Beží'}
     </span>
   );
 }

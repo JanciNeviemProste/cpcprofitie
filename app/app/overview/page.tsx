@@ -2,6 +2,9 @@ import Link from 'next/link';
 import { Sparkles } from 'lucide-react';
 import { KpiCard, formatEur, formatNumber } from '@/components/app/kpi-card';
 import { getCurrentUser } from '@/lib/auth/server';
+import { PLANS } from '@/lib/billing/plans';
+import { effectivePlan, getUserSubscription } from '@/lib/billing/subscription';
+import { getUsageSummary } from '@/lib/billing/usage';
 import { getTrendingModels } from '@/lib/db/queries/dashboard';
 
 export const metadata = { title: 'Prehľad' };
@@ -9,6 +12,11 @@ export const dynamic = 'force-dynamic';
 
 export default async function OverviewPage() {
   const user = await getCurrentUser();
+  const [sub, usage] = user
+    ? await Promise.all([getUserSubscription(user.id), getUsageSummary(user.id)])
+    : [null, null];
+  const plan = PLANS[effectivePlan(sub)];
+  const aiLimit = plan.quotas.aiListingsPerMonth;
   const trending = await getTrendingModels(50);
   const top10 = trending.slice(0, 10);
   const totalActive = trending.reduce((s, t) => s + t.countActive, 0);
@@ -42,7 +50,11 @@ export default async function OverviewPage() {
           value={String(trending.length)}
           hint="s najmenej 1 aktívnym inzerátom"
         />
-        <KpiCard label="AI inzeráty / mesiac" value="0 / 3" hint="Free plán" />
+        <KpiCard
+          label="AI inzeráty / mesiac"
+          value={`${usage?.aiListingsThisMonth ?? 0} / ${aiLimit < 0 ? '∞' : aiLimit}`}
+          hint={`${plan.name} plán`}
+        />
       </div>
 
       <section className="border-border/40 bg-card/30 mt-10 rounded-xl border p-6">

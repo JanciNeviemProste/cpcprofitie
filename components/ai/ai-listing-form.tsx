@@ -63,7 +63,15 @@ export function AiListingForm() {
       setMode((res.headers.get('x-cpcprofit-mode') as 'live' | 'mock') ?? null);
       if (!res.ok || !res.body) {
         const text = await res.text();
-        setError(`Chyba ${res.status}: ${text.slice(0, 200)}`);
+        let message = `Chyba ${res.status}: ${text.slice(0, 200)}`;
+        try {
+          const parsed = JSON.parse(text) as { message?: string; error?: string };
+          if (parsed.message) message = parsed.message;
+          else if (parsed.error === 'rate_limited') message = 'Priveľa požiadaviek — skúste o chvíľu.';
+        } catch {
+          // non-JSON body — keep the raw fallback message
+        }
+        setError(message);
         setStreaming(false);
         return;
       }

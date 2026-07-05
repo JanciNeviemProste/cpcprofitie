@@ -3,6 +3,9 @@ import { z } from 'zod';
 import { DEFAULT_MODEL } from '@/lib/ai';
 import { buildSystemPrompt, buildUserPrompt } from '@/lib/ai/prompts';
 import { getCurrentUser } from '@/lib/auth/server';
+import { canGenerateAiListing } from '@/lib/billing/quota';
+import { effectivePlan, getUserSubscription } from '@/lib/billing/subscription';
+import { countAiListingsThisMonth, recordAiListing } from '@/lib/billing/usage';
 import { rateLimit } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
@@ -80,12 +83,46 @@ export async function POST(request: Request) {
     });
   }
 
+  // Live generations burn real tokens — enforce the per-plan monthly quota
+  // (lib/billing/quota.ts) and log each run into ai_listings so the billing
+  // page shows real usage. Mock mode above stays uncounted (costs nothing).
+  if (user) {
+    const [sub, usedThisMonth] = await Promise.all([
+      getUserSubscription(user.id),
+      countAiListingsThisMonth(user.id),
+    ]);
+    const quota = canGenerateAiListing(effectivePlan(sub), usedThisMonth);
+    if (!quota.ok) {
+      return Response.json(
+        {
+          error: 'quota_exceeded',
+          limit: quota.limit,
+          message: `Vyčerpali ste mesačný limit ${quota.limit} AI inzerátov. Prejdite na vyšší plán v sekcii Predplatné.`,
+        },
+        { status: 429 },
+      );
+    }
+  }
+
   try {
     const result = streamText({
       model: DEFAULT_MODEL,
       system,
       prompt: userPrompt,
       temperature: 0.7,
+      onFinish: user
+        ? async ({ text, usage }) => {
+            await recordAiListing({
+              userId: user.id,
+              input,
+              generatedTitle: text.split('\n')[0]?.slice(0, 200) ?? null,
+              generatedBody: text,
+              modelUsed: DEFAULT_MODEL,
+              promptTokens: usage.inputTokens ?? null,
+              completionTokens: usage.outputTokens ?? null,
+            });
+          }
+        : undefined,
     });
     return result.toTextStreamResponse({
       headers: { 'x-cpcprofit-mode': 'live' },
