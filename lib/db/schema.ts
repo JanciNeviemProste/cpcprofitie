@@ -320,7 +320,12 @@ export const events = pgTable(
     payload: jsonb('payload').notNull().default(sql`'{}'::jsonb`),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('events_user_created_idx').on(t.userId, t.createdAt)],
+  (t) => [
+    index('events_user_created_idx').on(t.userId, t.createdAt),
+    // Notification backstop queries filter by (type, created_at) — without
+    // this the daily crons seq-scan the whole ever-growing events table.
+    index('events_type_created_idx').on(t.type, t.createdAt),
+  ],
 );
 
 export const scrapeRuns = pgTable(

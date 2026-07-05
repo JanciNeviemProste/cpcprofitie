@@ -4,6 +4,8 @@
     { "path": "/api/cron/weekly-maintenance", "schedule": "0 2 * * 0" },
     { "path": "/api/cron/check-removed", "schedule": "0 3 * * *" },
     { "path": "/api/cron/daily-price-snapshot", "schedule": "0 4 * * *" },
-    { "path": "/api/cron/detect-sold", "schedule": "0 5 * * *" }
+    { "path": "/api/cron/detect-sold", "schedule": "0 5 * * *" },
+    { "path": "/api/cron/watchlist-alerts", "schedule": "0 6 * * *" },
+    { "path": "/api/cron/weekly-digest", "schedule": "0 7 * * 1" }
   ]
 }

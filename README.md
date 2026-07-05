@@ -116,7 +116,8 @@ prázdne výsledky, AI form demo stream) alebo sa vypnú.
 | `AI_GATEWAY_API_KEY` | Vercel AI Gateway | Vercel → AI → Gateway |
 | `STRIPE_SECRET_KEY` / `_WEBHOOK_SECRET` | Predplatné a fakturácia | Stripe Dashboard |
 | `STRIPE_PRICE_*` | Konkrétne plány (Plus/Premium × monthly/yearly) | Stripe → Products |
-| `RESEND_API_KEY` | Transakčné e-maily | Resend → API Keys |
+| `RESEND_API_KEY` | Watchlist alerty + týždenný digest (bez kľúča mock mód — sendy sa len logujú) | Resend → API Keys |
+| `EMAIL_FROM` | From adresa notifikácií (default `CPCProfit <onboarding@resend.dev>`) | vlastná doména v Resend |
 | `BLOB_READ_WRITE_TOKEN` | Vercel Blob upload | Vercel → Storage → Blob |
 | `UPSTASH_REDIS_REST_URL` / `_TOKEN` | Rate limiting | Vercel Marketplace → Upstash |
 | `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` | Error tracking | Sentry → Project → Client Keys |
