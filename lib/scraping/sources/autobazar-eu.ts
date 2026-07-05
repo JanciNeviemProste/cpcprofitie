@@ -45,15 +45,24 @@ type RawListing = {
   user?: { phone?: string | null; phoneNumber?: string | null } | null;
 };
 
+type TrpcQuery = { queryKey?: unknown[]; state?: { data?: { data?: unknown } } };
+type NextDataEnvelope = {
+  props?: { pageProps?: { trpcState?: { queries?: TrpcQuery[] } } };
+};
+
 function pickListings(parsed: unknown): RawListing[] {
   // Drill into trpcState.queries[].state.data.data — that's where the
   // `search.search` query result is. We accept any query whose data
   // payload is an array of objects with an `id` field.
-  const queries = (parsed as any)?.props?.pageProps?.trpcState?.queries;
+  const queries = (parsed as NextDataEnvelope)?.props?.pageProps?.trpcState?.queries;
   if (!Array.isArray(queries)) return [];
   for (const q of queries) {
     const arr = q?.state?.data?.data;
-    if (Array.isArray(arr) && arr.length > 0 && typeof arr[0]?.id === 'string') {
+    if (
+      Array.isArray(arr) &&
+      arr.length > 0 &&
+      typeof (arr[0] as { id?: unknown })?.id === 'string'
+    ) {
       return arr as RawListing[];
     }
   }

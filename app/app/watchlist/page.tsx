@@ -20,9 +20,14 @@ export default async function WatchlistPage() {
             E-mail upozornenie keď sa objaví zhoda s vašimi kritériami.
           </p>
         </div>
-        <button className="border-primary/40 bg-primary text-primary-foreground hover:bg-primary/90 inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium">
+        {/* Create-flow isn't built yet — disabled so the button doesn't dead-click. */}
+        <button
+          disabled
+          title="Pripravujeme"
+          className="border-primary/40 bg-primary text-primary-foreground inline-flex cursor-not-allowed items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium opacity-50"
+        >
           <Plus className="size-4" />
-          Pridať sledovanie
+          Pridať sledovanie (čoskoro)
         </button>
       </div>
 

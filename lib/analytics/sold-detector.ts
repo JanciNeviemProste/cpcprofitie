@@ -72,53 +72,47 @@ export async function detectSoldListings(
 
     if (rows.length === 0) break;
 
-    for (const row of rows) {
-      stats.scanned++;
-      try {
-        // Advance cursor regardless of outcome.
-        const idStr = typeof row.id === 'bigint' ? row.id.toString() : String(row.id);
-        const idBig = BigInt(idStr);
-        if (idBig > cursor) cursor = idBig;
+    stats.scanned += rows.length;
+    const idFragments = rows.map((row) => {
+      const idStr = typeof row.id === 'bigint' ? row.id.toString() : String(row.id);
+      const idBig = BigInt(idStr);
+      if (idBig > cursor) cursor = idBig;
+      return sql`${idStr}::bigint`;
+    });
 
-        if (!row.fingerprint) {
-          // No fingerprint → can't prove relisting, treat as sold.
-          await db.execute(sql`
-            UPDATE ${listings}
-            SET sold_at = removed_at
-            WHERE id = ${idStr}::bigint AND sold_at IS NULL AND removed_at IS NOT NULL
-          `);
-          stats.markedSold++;
-          continue;
-        }
-
-        const relistedResult = await db.execute(sql`
-          SELECT 1
-          FROM ${listings}
-          WHERE fingerprint = ${row.fingerprint}
-            AND id <> ${idStr}::bigint
-            AND source = ${row.source}
-            AND first_seen_at BETWEEN ${row.removed_at as unknown as string}::timestamptz
-              AND (${row.removed_at as unknown as string}::timestamptz + interval '30 days')
-          LIMIT 1
-        `);
-        const relisted = (relistedResult as unknown as unknown[]).length > 0;
-
-        if (relisted) {
-          stats.keptRelisted++;
-        } else {
-          await db.execute(sql`
-            UPDATE ${listings}
-            SET sold_at = removed_at
-            WHERE id = ${idStr}::bigint AND sold_at IS NULL AND removed_at IS NOT NULL
-          `);
-          stats.markedSold++;
-        }
-      } catch (e) {
-        stats.errors++;
-        Sentry.captureException(e, {
-          tags: { component: 'sold-detector', step: 'processRow' },
-        });
-      }
+    // One set-based UPDATE per batch (was: SELECT + UPDATE per row, up to
+    // ~20k queries/run). "Sold" = no relisting with the same fingerprint +
+    // source within 30 days after removal; no fingerprint = can't prove a
+    // relisting, treat as sold.
+    try {
+      const marked = await db.execute(sql`
+        UPDATE ${listings} l
+        SET sold_at = l.removed_at
+        WHERE l.id IN (${sql.join(idFragments, sql`, `)})
+          AND l.sold_at IS NULL
+          AND l.removed_at IS NOT NULL
+          AND (
+            l.fingerprint IS NULL
+            OR NOT EXISTS (
+              SELECT 1
+              FROM ${listings} r
+              WHERE r.fingerprint = l.fingerprint
+                AND r.id <> l.id
+                AND r.source = l.source
+                AND r.first_seen_at BETWEEN l.removed_at
+                  AND (l.removed_at + interval '30 days')
+            )
+          )
+        RETURNING l.id
+      `);
+      const markedCount = (marked as unknown as unknown[]).length;
+      stats.markedSold += markedCount;
+      stats.keptRelisted += rows.length - markedCount;
+    } catch (e) {
+      stats.errors++;
+      Sentry.captureException(e, {
+        tags: { component: 'sold-detector', step: 'processBatch' },
+      });
     }
 
     console.log(

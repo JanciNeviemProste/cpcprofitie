@@ -1,5 +1,6 @@
 // Query helpers for /app/trends and /app/deals pages. Read-only — no writes.
 
+import * as Sentry from '@sentry/nextjs';
 import { sql } from 'drizzle-orm';
 import { getDb } from '../index';
 
@@ -46,6 +47,18 @@ export async function getTrendingModels(opts: {
   limit?: number;
   sort?: TrendsSort;
 } = {}): Promise<TrendRow[]> {
+  try {
+    return await getTrendingModelsUnsafe(opts);
+  } catch (e) {
+    Sentry.captureException(e, { tags: { component: 'trends', step: 'getTrendingModels' } });
+    return [];
+  }
+}
+
+async function getTrendingModelsUnsafe(opts: {
+  limit?: number;
+  sort?: TrendsSort;
+}): Promise<TrendRow[]> {
   const limit = opts.limit ?? 20;
   const sort = opts.sort ?? 'demand';
   const db = getDb();
@@ -159,6 +172,19 @@ export async function getTopDeals(opts: {
   filters?: DealFilters;
   sort?: DealsSort;
 } = {}): Promise<DealRow[]> {
+  try {
+    return await getTopDealsUnsafe(opts);
+  } catch (e) {
+    Sentry.captureException(e, { tags: { component: 'trends', step: 'getTopDeals' } });
+    return [];
+  }
+}
+
+async function getTopDealsUnsafe(opts: {
+  limit?: number;
+  filters?: DealFilters;
+  sort?: DealsSort;
+}): Promise<DealRow[]> {
   const limit = opts.limit ?? 50;
   const sort = opts.sort ?? 'discount';
   const f = opts.filters ?? {};
@@ -259,6 +285,18 @@ export async function getTopDeals(opts: {
 export async function getModelTrajectory(
   modelId: number,
   opts: { weeks?: number } = {},
+): Promise<Array<{ capturedOn: Date; medianPriceEur: number | null; countActive: number }>> {
+  try {
+    return await getModelTrajectoryUnsafe(modelId, opts);
+  } catch (e) {
+    Sentry.captureException(e, { tags: { component: 'trends', step: 'getModelTrajectory' } });
+    return [];
+  }
+}
+
+async function getModelTrajectoryUnsafe(
+  modelId: number,
+  opts: { weeks?: number },
 ): Promise<Array<{ capturedOn: Date; medianPriceEur: number | null; countActive: number }>> {
   const weeks = opts.weeks ?? 12;
   const db = getDb();

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createSupabaseBrowserClient } from '@/lib/auth/client';
 import { Button } from '@/components/ui/button';
@@ -10,17 +10,21 @@ import { Label } from '@/components/ui/label';
 export function UpdatePasswordForm() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+
+  // Client availability is a deterministic env question — derive it instead
+  // of setting error state from inside the effect.
+  const supabaseAvailable = useMemo(() => createSupabaseBrowserClient() !== null, []);
+  const error =
+    formError ?? (supabaseAvailable ? null : 'Obnovenie hesla je dočasne nedostupné.');
+  const setError = setFormError;
 
   // Supabase delivers the recovery session via URL hash (#access_token=…&type=recovery).
   // The browser client parses it on mount; wait until a session exists before allowing submit.
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
-    if (!supabase) {
-      setError('Obnovenie hesla je dočasne nedostupné.');
-      return;
-    }
+    if (!supabase) return;
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') setReady(true);
     });

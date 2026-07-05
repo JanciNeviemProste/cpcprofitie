@@ -276,10 +276,14 @@ export function FilterSheet({ sources, regions, initialFilters }: Props) {
     isFirst.current = true;
   }, [sp.toString()]);
 
-  // When opening sheet, seed draft from current applied state
-  useEffect(() => {
+  // When opening sheet, seed draft from current applied state. Done as the
+  // adjust-state-during-render pattern (not an effect) to avoid a cascading
+  // re-render after the sheet mounts.
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
     if (open) setDraft(state);
-  }, [open, state]);
+  }
 
   function toggle<T extends string>(arr: T[], v: T): T[] {
     return arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v];

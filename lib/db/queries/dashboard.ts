@@ -2,6 +2,7 @@
 // surfaces. Each function returns a graceful empty result when the DB is
 // unavailable (preview deploys without DATABASE_URL).
 
+import * as Sentry from '@sentry/nextjs';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import {
@@ -23,6 +24,15 @@ export type TrendingItem = {
  *  table lacks model_id (e.g. pre-backfill). Listings without model_id are
  *  bucketed into an "unknown" sentinel and excluded. */
 export async function getTrendingModels(limit = 20): Promise<TrendingItem[]> {
+  try {
+    return await getTrendingModelsUnsafe(limit);
+  } catch (e) {
+    Sentry.captureException(e, { tags: { component: 'dashboard', step: 'getTrendingModels' } });
+    return [];
+  }
+}
+
+async function getTrendingModelsUnsafe(limit: number): Promise<TrendingItem[]> {
   const db = getDb();
   const rows = await db
     .select({
@@ -66,6 +76,15 @@ export type GarageRow = {
 };
 
 export async function getGarageEntries(userId: string): Promise<GarageRow[]> {
+  try {
+    return await getGarageEntriesUnsafe(userId);
+  } catch (e) {
+    Sentry.captureException(e, { tags: { component: 'dashboard', step: 'getGarageEntries' } });
+    return [];
+  }
+}
+
+async function getGarageEntriesUnsafe(userId: string): Promise<GarageRow[]> {
   const db = getDb();
   const rows = await db
     .select({
@@ -109,6 +128,15 @@ export type ModelKpi = {
 };
 
 export async function getModelKpi(slug: string): Promise<ModelKpi | null> {
+  try {
+    return await getModelKpiUnsafe(slug);
+  } catch (e) {
+    Sentry.captureException(e, { tags: { component: 'dashboard', step: 'getModelKpi' } });
+    return null;
+  }
+}
+
+async function getModelKpiUnsafe(slug: string): Promise<ModelKpi | null> {
   const db = getDb();
   const rows = await db
     .select({
@@ -160,6 +188,15 @@ export type WatchlistRow = {
 };
 
 export async function getWatchlistEntries(userId: string): Promise<WatchlistRow[]> {
+  try {
+    return await getWatchlistEntriesUnsafe(userId);
+  } catch (e) {
+    Sentry.captureException(e, { tags: { component: 'dashboard', step: 'getWatchlistEntries' } });
+    return [];
+  }
+}
+
+async function getWatchlistEntriesUnsafe(userId: string): Promise<WatchlistRow[]> {
   const db = getDb();
   const rows = await db
     .select({

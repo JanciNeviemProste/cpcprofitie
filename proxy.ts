@@ -6,6 +6,9 @@ const PROD = process.env.VERCEL_ENV === 'production';
 // Market-info pages — viewable without login. They show aggregated public
 // scraping data, no user-specific records. /app/garage, /app/watchlist,
 // /app/profile, /app/billing, /app/admin/* stay auth-gated.
+// /app/ai-listing is a public demo surface: the generation API has its own
+// guards (auth required in prod once AI_GATEWAY_API_KEY is set, per-IP rate
+// limit for anon).
 const PUBLIC_APP_PREFIXES = [
   '/app/listings',
   '/app/overview',
@@ -14,6 +17,7 @@ const PUBLIC_APP_PREFIXES = [
   '/app/analysis',
   '/app/trends',
   '/app/deals',
+  '/app/ai-listing',
 ];
 
 export async function proxy(request: NextRequest) {

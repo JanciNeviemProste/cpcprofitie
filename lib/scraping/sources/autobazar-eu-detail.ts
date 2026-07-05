@@ -43,8 +43,13 @@ type RawRecord = {
   location?: { name?: string | null } | null;
 };
 
+type TrpcQuery = { queryKey?: unknown[]; state?: { data?: unknown } };
+type NextDataEnvelope = {
+  props?: { pageProps?: { trpcState?: { queries?: TrpcQuery[] } } };
+};
+
 function pickRecord(parsed: unknown): RawRecord | null {
-  const queries = (parsed as any)?.props?.pageProps?.trpcState?.queries;
+  const queries = (parsed as NextDataEnvelope)?.props?.pageProps?.trpcState?.queries;
   if (!Array.isArray(queries)) return null;
   for (const q of queries) {
     const key = q?.queryKey?.[0];

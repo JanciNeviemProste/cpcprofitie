@@ -8,7 +8,7 @@ import {
 } from '../normalize';
 import type { NormalizedListing } from '../types';
 import { detailUrl, parseDetailPage } from './bazos-sk-detail';
-import type { ScraperSource } from './source-interface';
+import type { CheerioNode, ScraperSource } from './source-interface';
 
 const BASE = 'https://auto.bazos.sk';
 
@@ -158,7 +158,7 @@ function parseBazosKm(popis: string | null): number | null {
 // whose text matches the "N×" / "N krát" pattern.
 function parseBazosViewCount(
   $: cheerio.CheerioAPI,
-  $block: cheerio.Cheerio<any>,
+  $block: cheerio.Cheerio<CheerioNode>,
 ): number | undefined {
   const candidates = $block
     .filter('span.velikost10, span.velikost11')
@@ -181,7 +181,7 @@ function parseBazosViewCount(
 // or a span carrying TOP / PRO text. We search the block scope only.
 function parseBazosFeatured(
   $: cheerio.CheerioAPI,
-  $block: cheerio.Cheerio<any>,
+  $block: cheerio.Cheerio<CheerioNode>,
 ): boolean | undefined {
   const logos = $block
     .filter('b.bazoslogo, span.bazoslogo, b.toplogo, span.toplogo')

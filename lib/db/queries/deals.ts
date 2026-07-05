@@ -4,10 +4,12 @@
 // photo and exposes a typed DealCard shape. New columns from migration 0009
 // (deal_score, score_breakdown, explainer, est_recond_eur, est_profit_eur) are
 // optional in the result — rows from before the migration ran will have NULL
-// values which the UI fills with computed fallbacks.
+// values which are filled with a single fallback definition below.
 
+import * as Sentry from '@sentry/nextjs';
 import { sql } from 'drizzle-orm';
 import { getDb } from '../index';
+import { estimateProfit } from '@/lib/analytics/deal-score';
 import { SK_KRAJE, krajByName } from '@/lib/data/sk-regions';
 import type { Source } from '@/lib/scraping/types';
 
@@ -23,7 +25,7 @@ export type ScoreBreakdown = {
  * Per-listing deal lookup. Powers the DealScore banner on `/app/listings/[id]`.
  * Returns null when:
  *   - no row in flip_opportunities for this listing, OR
- *   - row exists but `deal_score` is NULL (Agent A's enrichment hasn't run yet).
+ *   - row exists but `deal_score` is NULL (weekly enrichment hasn't run yet).
  * Callers should hide the banner in either case.
  */
 export type DealForListing = {
@@ -45,7 +47,7 @@ export type DealForListing = {
   };
 };
 
-function normalizeBreakdown(raw: unknown): DealForListing['scoreBreakdown'] {
+export function normalizeBreakdown(raw: unknown): DealForListing['scoreBreakdown'] {
   const fallback = { discount: 0, cohort: 0, seller: 0, photo: 0, recency: 0 };
   if (!raw || typeof raw !== 'object') return fallback;
   const obj = raw as Record<string, unknown>;
@@ -62,7 +64,31 @@ function normalizeBreakdown(raw: unknown): DealForListing['scoreBreakdown'] {
   };
 }
 
+// Single fallback profit path for rows the weekly cron hasn't enriched yet —
+// must match what computeFlipOpportunities persists (estimateProfit, incl.
+// the 5% transaction fee; may be negative for thin deals).
+export function fallbackProfit(
+  marketMedianEur: number,
+  priceEur: number | null,
+  estRecondEur: number | null,
+): number {
+  return estimateProfit(priceEur ?? 0, marketMedianEur, estRecondEur ?? 800);
+}
+
 export async function getDealForListing(
+  listingId: bigint,
+): Promise<DealForListing | null> {
+  try {
+    return await getDealForListingUnsafe(listingId);
+  } catch (e) {
+    // Graceful-empty on DB unavailability, matching the other query modules —
+    // a missing banner beats a 500 on the listing detail.
+    Sentry.captureException(e, { tags: { component: 'deals', step: 'getDealForListing' } });
+    return null;
+  }
+}
+
+async function getDealForListingUnsafe(
   listingId: bigint,
 ): Promise<DealForListing | null> {
   const db = getDb();
@@ -105,8 +131,7 @@ export async function getDealForListing(
 
   const recond = r.est_recond_eur ?? 800;
   const estProfit =
-    r.est_profit_eur ??
-    Math.max(0, Math.round(r.market_median_eur - r.price_eur - recond));
+    r.est_profit_eur ?? fallbackProfit(r.market_median_eur, r.price_eur, recond);
 
   return {
     dealScore: r.deal_score,
@@ -120,115 +145,6 @@ export async function getDealForListing(
     explainer: r.explainer ?? '',
     scoreBreakdown: normalizeBreakdown(r.score_breakdown),
   };
-}
-
-/**
- * Top-N featured deals for the public landing page. Only returns enriched
- * rows (deal_score IS NOT NULL) — landing surface stays clean before Agent A
- * has run. Ordered by deal_score DESC.
- */
-export async function getTopFeaturedDeals(limit: number): Promise<DealCard[]> {
-  const safeLimit = Math.max(1, Math.min(20, limit));
-  const db = getDb();
-  const rows = (await db.execute(sql`
-    SELECT
-      fo.listing_id,
-      l.source::text AS source,
-      l.url,
-      l.raw_title,
-      vmk.name AS make_name,
-      vm.name AS model_name,
-      l.year,
-      l.mileage_km,
-      l.region,
-      l.price_eur::float8 AS price_eur,
-      fo.market_median_eur::float8 AS market_median_eur,
-      fo.market_p25_eur::float8 AS market_p25_eur,
-      fo.discount_pct::float8 AS discount_pct,
-      fo.potential_gain_eur::float8 AS potential_gain_eur,
-      fo.cohort_size,
-      fo.confidence,
-      fo.deal_score,
-      fo.score_breakdown,
-      fo.explainer,
-      fo.est_recond_eur,
-      fo.est_profit_eur,
-      ld.seller_type,
-      (
-        SELECT url FROM listing_photos WHERE listing_id = l.id ORDER BY position ASC LIMIT 1
-      ) AS hero_photo_url
-    FROM flip_opportunities fo
-    JOIN listings l ON l.id = fo.listing_id
-    LEFT JOIN vehicle_models vm ON vm.id = l.model_id
-    LEFT JOIN vehicle_makes vmk ON vmk.id = vm.make_id
-    LEFT JOIN listing_details ld ON ld.listing_id = l.id
-    WHERE l.sold_at IS NULL
-      AND l.removed_at IS NULL
-      AND l.canonical_listing_id IS NULL
-      AND fo.deal_score IS NOT NULL
-    ORDER BY fo.deal_score DESC
-    LIMIT ${safeLimit}
-  `)) as unknown as Array<{
-    listing_id: string | number | bigint;
-    source: string;
-    url: string;
-    raw_title: string | null;
-    make_name: string | null;
-    model_name: string | null;
-    year: number | null;
-    mileage_km: number | null;
-    region: string | null;
-    price_eur: number;
-    market_median_eur: number;
-    market_p25_eur: number;
-    discount_pct: number;
-    potential_gain_eur: number;
-    cohort_size: number;
-    confidence: 'low' | 'medium' | 'high';
-    deal_score: number;
-    score_breakdown: ScoreBreakdown | null;
-    explainer: string | null;
-    est_recond_eur: number | null;
-    est_profit_eur: number | null;
-    seller_type: 'private' | 'dealer' | null;
-    hero_photo_url: string | null;
-  }>;
-
-  return rows.map((r) => ({
-    listingId: BigInt(r.listing_id as number),
-    source: r.source as Source,
-    url: r.url,
-    rawTitle: r.raw_title,
-    makeName: r.make_name,
-    modelName: r.model_name,
-    year: r.year,
-    mileageKm: r.mileage_km,
-    region: r.region,
-    priceEur: r.price_eur != null ? Math.round(r.price_eur) : null,
-    heroPhotoUrl: r.hero_photo_url,
-    dealScore: r.deal_score,
-    scoreBreakdown: r.score_breakdown ?? null,
-    marketMedianEur: Math.round(r.market_median_eur),
-    marketP25Eur: Math.round(r.market_p25_eur),
-    discountPct: Math.round(r.discount_pct * 10) / 10,
-    potentialGainEur: Math.round(r.potential_gain_eur),
-    estProfitEur:
-      r.est_profit_eur ??
-      Math.max(
-        0,
-        Math.round(r.market_median_eur - (r.price_eur ?? 0) - (r.est_recond_eur ?? 800)),
-      ),
-    estRecondEur: r.est_recond_eur ?? 800,
-    explainer: r.explainer ?? buildFallbackExplainer({
-      discountPct: r.discount_pct,
-      marketMedianEur: Math.round(r.market_median_eur),
-      cohortSize: r.cohort_size,
-      confidence: r.confidence,
-    }),
-    cohortSize: r.cohort_size,
-    confidence: r.confidence,
-    sellerType: r.seller_type ?? null,
-  }));
 }
 
 export type DealCard = {
@@ -263,9 +179,11 @@ export type GetTopDealsOpts = {
   sources?: Source[];
   regions?: string[]; // kraj names
   maxBudget?: number;
+  /** Only rows already enriched with deal_score (used by the landing page). */
+  enrichedOnly?: boolean;
 };
 
-function buildFallbackExplainer(row: {
+export function buildFallbackExplainer(row: {
   discountPct: number;
   marketMedianEur: number;
   cohortSize: number;
@@ -281,22 +199,94 @@ function buildFallbackExplainer(row: {
   return `${disc}% pod mediánom (${row.marketMedianEur.toLocaleString('sk-SK')} €), kohort ${row.cohortSize} aut — ${conf}.`;
 }
 
-// Convert confidence/cohort/discount to a 0-100 fallback score when deal_score
-// is NULL (pre-migration rows or weekly cron hasn't recomputed yet).
-function fallbackScore(row: {
-  discountPct: number;
-  cohortSize: number;
+// The ONE definition of "effective score": persisted deal_score when present,
+// otherwise a confidence/discount blend for rows the weekly cron hasn't
+// recomputed yet. Used for SELECT, filtering, and ordering so the displayed
+// score always matches what was filtered/sorted on.
+const EFFECTIVE_SCORE = sql`COALESCE(
+  fo.deal_score,
+  LEAST(100, GREATEST(0,
+    (fo.discount_pct * 1.5)::int
+    + (CASE WHEN fo.cohort_size >= 20 THEN 25 WHEN fo.cohort_size >= 10 THEN 18 WHEN fo.cohort_size >= 5 THEN 10 ELSE 4 END)
+    + (CASE fo.confidence WHEN 'high' THEN 25 WHEN 'medium' THEN 15 ELSE 5 END)
+  ))
+)`;
+
+export type DealRow = {
+  listing_id: string | number | bigint;
+  source: string;
+  url: string;
+  raw_title: string | null;
+  make_name: string | null;
+  model_name: string | null;
+  year: number | null;
+  mileage_km: number | null;
+  region: string | null;
+  price_eur: number | null;
+  market_median_eur: number;
+  market_p25_eur: number;
+  discount_pct: number;
+  potential_gain_eur: number;
+  cohort_size: number;
   confidence: 'low' | 'medium' | 'high';
-}): number {
-  const discPart = Math.min(50, Math.max(0, row.discountPct * 1.5));
-  const cohortPart =
-    row.cohortSize >= 20 ? 25 : row.cohortSize >= 10 ? 18 : row.cohortSize >= 5 ? 10 : 4;
-  const confPart =
-    row.confidence === 'high' ? 25 : row.confidence === 'medium' ? 15 : 5;
-  return Math.min(100, Math.round(discPart + cohortPart + confPart));
+  effective_score: number;
+  score_breakdown: ScoreBreakdown | null;
+  explainer: string | null;
+  est_recond_eur: number | null;
+  est_profit_eur: number | null;
+  seller_type: 'private' | 'dealer' | null;
+  hero_photo_url: string | null;
+};
+
+export function mapDealRow(r: DealRow): DealCard {
+  return {
+    listingId: BigInt(r.listing_id),
+    source: r.source as Source,
+    url: r.url,
+    rawTitle: r.raw_title,
+    makeName: r.make_name,
+    modelName: r.model_name,
+    year: r.year,
+    mileageKm: r.mileage_km,
+    region: r.region,
+    priceEur: r.price_eur != null ? Math.round(r.price_eur) : null,
+    heroPhotoUrl: r.hero_photo_url,
+    dealScore: r.effective_score,
+    scoreBreakdown: r.score_breakdown ?? null,
+    marketMedianEur: Math.round(r.market_median_eur),
+    marketP25Eur: Math.round(r.market_p25_eur),
+    discountPct: Math.round(r.discount_pct * 10) / 10,
+    potentialGainEur: Math.round(r.potential_gain_eur),
+    estProfitEur:
+      r.est_profit_eur ??
+      fallbackProfit(Math.round(r.market_median_eur), r.price_eur, r.est_recond_eur),
+    estRecondEur: r.est_recond_eur ?? 800,
+    explainer:
+      r.explainer ??
+      buildFallbackExplainer({
+        discountPct: r.discount_pct,
+        marketMedianEur: Math.round(r.market_median_eur),
+        cohortSize: r.cohort_size,
+        confidence: r.confidence,
+      }),
+    cohortSize: r.cohort_size,
+    confidence: r.confidence,
+    sellerType: r.seller_type ?? null,
+  };
 }
 
 export async function getTopDealsV2(opts: GetTopDealsOpts = {}): Promise<DealCard[]> {
+  try {
+    return await getTopDealsV2Unsafe(opts);
+  } catch (e) {
+    // Graceful-empty — this also feeds the public landing page, which must
+    // render (with the empty state) even when the DB is unreachable.
+    Sentry.captureException(e, { tags: { component: 'deals', step: 'getTopDealsV2' } });
+    return [];
+  }
+}
+
+async function getTopDealsV2Unsafe(opts: GetTopDealsOpts): Promise<DealCard[]> {
   const limit = Math.min(100, Math.max(1, opts.limit ?? 50));
   const minScore = opts.minScore != null ? Math.max(0, Math.min(100, opts.minScore)) : 0;
   const db = getDb();
@@ -326,18 +316,9 @@ export async function getTopDealsV2(opts: GetTopDealsOpts = {}): Promise<DealCar
       ? sql`AND l.price_eur <= ${opts.maxBudget}`
       : sql``;
 
-  // deal_score may be NULL on rows computed before migration 0009 — fall back
-  // to a confidence/discount blend so the page never starves of cards.
-  const scoreFilter = minScore > 0
-    ? sql`AND COALESCE(
-        fo.deal_score,
-        LEAST(100, GREATEST(0,
-          (fo.discount_pct * 1.5)::int
-          + (CASE WHEN fo.cohort_size >= 20 THEN 25 WHEN fo.cohort_size >= 10 THEN 18 WHEN fo.cohort_size >= 5 THEN 10 ELSE 4 END)
-          + (CASE fo.confidence WHEN 'high' THEN 25 WHEN 'medium' THEN 15 ELSE 5 END)
-        ))
-      ) >= ${minScore}`
-    : sql``;
+  const scoreFilter = minScore > 0 ? sql`AND ${EFFECTIVE_SCORE} >= ${minScore}` : sql``;
+
+  const enrichedFilter = opts.enrichedOnly ? sql`AND fo.deal_score IS NOT NULL` : sql``;
 
   const rows = (await db.execute(sql`
     SELECT
@@ -357,7 +338,7 @@ export async function getTopDealsV2(opts: GetTopDealsOpts = {}): Promise<DealCar
       fo.potential_gain_eur::float8 AS potential_gain_eur,
       fo.cohort_size,
       fo.confidence,
-      fo.deal_score,
+      ${EFFECTIVE_SCORE} AS effective_score,
       fo.score_breakdown,
       fo.explainer,
       fo.est_recond_eur,
@@ -374,74 +355,23 @@ export async function getTopDealsV2(opts: GetTopDealsOpts = {}): Promise<DealCar
     WHERE l.sold_at IS NULL
       AND l.removed_at IS NULL
       AND l.canonical_listing_id IS NULL
+      ${enrichedFilter}
       ${sourcesFilter}
       ${regionFilter}
       ${budgetFilter}
       ${scoreFilter}
-    ORDER BY fo.deal_score DESC NULLS LAST, fo.discount_pct DESC
+    ORDER BY ${EFFECTIVE_SCORE} DESC, fo.discount_pct DESC
     LIMIT ${limit}
-  `)) as unknown as Array<{
-    listing_id: string | number | bigint;
-    source: string;
-    url: string;
-    raw_title: string | null;
-    make_name: string | null;
-    model_name: string | null;
-    year: number | null;
-    mileage_km: number | null;
-    region: string | null;
-    price_eur: number;
-    market_median_eur: number;
-    market_p25_eur: number;
-    discount_pct: number;
-    potential_gain_eur: number;
-    cohort_size: number;
-    confidence: 'low' | 'medium' | 'high';
-    deal_score: number | null;
-    score_breakdown: ScoreBreakdown | null;
-    explainer: string | null;
-    est_recond_eur: number | null;
-    est_profit_eur: number | null;
-    seller_type: 'private' | 'dealer' | null;
-    hero_photo_url: string | null;
-  }>;
+  `)) as unknown as DealRow[];
 
-  return rows.map((r) => {
-    const baseRow = {
-      discountPct: r.discount_pct,
-      marketMedianEur: Math.round(r.market_median_eur),
-      cohortSize: r.cohort_size,
-      confidence: r.confidence,
-    };
-    return {
-      listingId: BigInt(r.listing_id as number),
-      source: r.source as Source,
-      url: r.url,
-      rawTitle: r.raw_title,
-      makeName: r.make_name,
-      modelName: r.model_name,
-      year: r.year,
-      mileageKm: r.mileage_km,
-      region: r.region,
-      priceEur: r.price_eur != null ? Math.round(r.price_eur) : null,
-      heroPhotoUrl: r.hero_photo_url,
-      dealScore: r.deal_score ?? fallbackScore(baseRow),
-      scoreBreakdown: r.score_breakdown ?? null,
-      marketMedianEur: Math.round(r.market_median_eur),
-      marketP25Eur: Math.round(r.market_p25_eur),
-      discountPct: Math.round(r.discount_pct * 10) / 10,
-      potentialGainEur: Math.round(r.potential_gain_eur),
-      estProfitEur:
-        r.est_profit_eur ??
-        Math.max(
-          0,
-          Math.round(r.market_median_eur - (r.price_eur ?? 0) - (r.est_recond_eur ?? 800)),
-        ),
-      estRecondEur: r.est_recond_eur ?? 800,
-      explainer: r.explainer ?? buildFallbackExplainer(baseRow),
-      cohortSize: r.cohort_size,
-      confidence: r.confidence,
-      sellerType: r.seller_type ?? null,
-    };
-  });
+  return rows.map(mapDealRow);
+}
+
+/**
+ * Top-N featured deals for the public landing page. Only returns enriched
+ * rows (deal_score IS NOT NULL) — landing surface stays clean before the
+ * weekly enrichment has run. Ordered by deal_score DESC.
+ */
+export async function getTopFeaturedDeals(limit: number): Promise<DealCard[]> {
+  return getTopDealsV2({ limit: Math.max(1, Math.min(20, limit)), enrichedOnly: true });
 }

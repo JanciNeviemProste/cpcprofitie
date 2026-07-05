@@ -3,6 +3,7 @@ import * as Sentry from '@sentry/nextjs';
 import { sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { toBigInt } from '@/lib/db/bigint';
+import { USER_AGENT } from '@/lib/scraping';
 
 // Daily HEAD-check cron — runs 03:00 UTC. Walks 1/7 of active listings per
 // day so the full population gets refreshed once a week. Listings that 404 /
@@ -20,8 +21,6 @@ const PROD = process.env.VERCEL_ENV === 'production';
 const CRAWL_DELAY_MS = 1200;
 const HEAD_TIMEOUT_MS = 8000;
 const SOURCES_TO_CHECK = ['bazos.sk', 'autobazar.sk'] as const;
-const USER_AGENT =
-  'Mozilla/5.0 (compatible; CPCProfitBot/1.0; +https://cpcprofitie.vercel.app/bot)';
 
 export async function GET(request: Request) {
   const expected = process.env.CRON_SECRET;

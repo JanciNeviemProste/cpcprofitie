@@ -2,7 +2,22 @@
 // UI to paginate over scraped inventory. No write paths live here — those
 // stay in `lib/scraping/persist.ts`.
 
-import { and, asc, desc, eq, exists, gte, ilike, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import * as Sentry from '@sentry/nextjs';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  gte,
+  ilike,
+  inArray,
+  isNull,
+  lte,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import { unstable_cache } from 'next/cache';
 import { getDb } from '../index';
 import {
@@ -75,7 +90,7 @@ type GetListingsOpts = {
 };
 
 function buildWhere(filters: ListingFilters | undefined) {
-  const parts = [] as any[];
+  const parts: SQL[] = [];
   // Active-only default: exclude soft-removed rows from all UI queries.
   parts.push(isNull(listings.removedAt));
 
@@ -168,6 +183,18 @@ function orderBy(sort: ListingsSort) {
 export async function getListings(
   opts: GetListingsOpts,
 ): Promise<{ rows: ListingRow[]; total: number }> {
+  try {
+    return await getListingsUnsafe(opts);
+  } catch (e) {
+    // Graceful-empty on DB unavailability, matching the other query modules.
+    Sentry.captureException(e, { tags: { component: 'listings', step: 'getListings' } });
+    return { rows: [], total: 0 };
+  }
+}
+
+async function getListingsUnsafe(
+  opts: GetListingsOpts,
+): Promise<{ rows: ListingRow[]; total: number }> {
   const db = getDb();
   const page = Math.max(1, opts.page);
   const perPage = Math.min(200, Math.max(1, opts.perPage));
@@ -253,6 +280,17 @@ export async function getListings(
 export async function getListingById(
   id: bigint,
 ): Promise<ListingDetailFull | null> {
+  try {
+    return await getListingByIdUnsafe(id);
+  } catch (e) {
+    Sentry.captureException(e, { tags: { component: 'listings', step: 'getListingById' } });
+    return null;
+  }
+}
+
+async function getListingByIdUnsafe(
+  id: bigint,
+): Promise<ListingDetailFull | null> {
   const db = getDb();
   const [base] = await db
     .select({
@@ -331,16 +369,21 @@ export async function getListingById(
 export type SourceCount = { source: Source; count: number };
 
 export async function getSourceCounts(): Promise<SourceCount[]> {
-  const db = getDb();
-  const rows = await db
-    .select({
-      source: listings.source,
-      n: sql<number>`count(*)::int`,
-    })
-    .from(listings)
-    .groupBy(listings.source)
-    .orderBy(desc(sql`count(*)`));
-  return rows.map((r) => ({ source: r.source as Source, count: r.n }));
+  try {
+    const db = getDb();
+    const rows = await db
+      .select({
+        source: listings.source,
+        n: sql<number>`count(*)::int`,
+      })
+      .from(listings)
+      .groupBy(listings.source)
+      .orderBy(desc(sql`count(*)`));
+    return rows.map((r) => ({ source: r.source as Source, count: r.n }));
+  } catch (e) {
+    Sentry.captureException(e, { tags: { component: 'listings', step: 'getSourceCounts' } });
+    return [];
+  }
 }
 
 export type ListingsStats = {
@@ -358,7 +401,13 @@ export type RegionGroup = { name: string; count: number };
 // listings, so a 10-minute revalidation window is fine.
 export const getRegionGroups = unstable_cache(
   async (): Promise<RegionGroup[]> => {
-    const db = getDb();
+    let db;
+    try {
+      db = getDb();
+    } catch (e) {
+      Sentry.captureException(e, { tags: { component: 'listings', step: 'getRegionGroups' } });
+      return SK_KRAJE.map((k) => ({ name: k.name, count: 0 }));
+    }
     const results = await Promise.all(
       SK_KRAJE.map(async (k) => {
         const condition = or(...k.patterns.map((p) => ilike(listings.region, p)));
@@ -381,7 +430,13 @@ export type TopMake = { name: string; count: number };
 // horizontal brand-chip strip under the search input.
 export const getTopMakes = unstable_cache(
   async (limit = 10): Promise<TopMake[]> => {
-    const db = getDb();
+    let db;
+    try {
+      db = getDb();
+    } catch (e) {
+      Sentry.captureException(e, { tags: { component: 'listings', step: 'getTopMakes' } });
+      return [];
+    }
     const rows = await db
       .select({
         name: vehicleMakes.name,
@@ -403,15 +458,20 @@ export const getTopMakes = unstable_cache(
 );
 
 export async function getDistinctRegions(): Promise<string[]> {
-  const db = getDb();
-  const rows = await db
-    .selectDistinct({ region: listings.region })
-    .from(listings)
-    .where(sql`${listings.region} IS NOT NULL`)
-    .orderBy(asc(listings.region));
-  return rows
-    .map((r) => r.region)
-    .filter((v): v is string => v != null);
+  try {
+    const db = getDb();
+    const rows = await db
+      .selectDistinct({ region: listings.region })
+      .from(listings)
+      .where(sql`${listings.region} IS NOT NULL`)
+      .orderBy(asc(listings.region));
+    return rows
+      .map((r) => r.region)
+      .filter((v): v is string => v != null);
+  } catch (e) {
+    Sentry.captureException(e, { tags: { component: 'listings', step: 'getDistinctRegions' } });
+    return [];
+  }
 }
 
 // Cached: 4 COUNT queries per request was producing stacking DB load under
@@ -419,7 +479,13 @@ export async function getDistinctRegions(): Promise<string[]> {
 // cron), so a 10-minute window is plenty for the header strip and ROZLOŽENIE.
 export const getListingsStats = unstable_cache(
   async (): Promise<ListingsStats> => {
-    const db = getDb();
+    let db;
+    try {
+      db = getDb();
+    } catch (e) {
+      Sentry.captureException(e, { tags: { component: 'listings', step: 'getListingsStats' } });
+      return { totalListings: 0, totalPhotos: 0, totalEnriched: 0, bySource: [] };
+    }
     const [listingsCount, photosCount, enrichedCount, bySource] = await Promise.all([
       db.select({ n: sql<number>`count(*)::int` }).from(listings),
       db.select({ n: sql<number>`count(*)::int` }).from(listingPhotos),

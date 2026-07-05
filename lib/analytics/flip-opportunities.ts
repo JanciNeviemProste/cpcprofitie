@@ -151,6 +151,7 @@ export async function computeFlipOpportunities(): Promise<FlipComputeStats> {
 
   const now = Date.now();
   const qualifyingIds: bigint[] = [];
+  const upsertRows: (typeof flipOpportunities.$inferInsert)[] = [];
 
   for (const c of candidates) {
     const cohortSize = Number(c.cohort_size);
@@ -206,22 +207,31 @@ export async function computeFlipOpportunities(): Promise<FlipComputeStats> {
     const listingId = toBigInt(c.id);
     const potentialGain = c.median_eur - c.price_eur;
 
+    upsertRows.push({
+      listingId,
+      marketMedianEur: String(Math.round(c.median_eur)),
+      marketP25Eur: String(Math.round(c.p25_eur)),
+      discountPct: String(round2(discountPct)),
+      potentialGainEur: String(Math.round(potentialGain)),
+      cohortSize,
+      confidence,
+      dealScore: ds.score,
+      scoreBreakdown: ds.breakdown,
+      explainer,
+      estRecondEur: DEFAULT_RECOND_EUR,
+      estProfitEur: estProfit,
+    });
+    qualifyingIds.push(listingId);
+  }
+
+  // Multi-row upserts in chunks — one round-trip per ~500 rows instead of one
+  // per candidate (thousands of sequential queries were a timeout risk).
+  const CHUNK = 500;
+  for (let i = 0; i < upsertRows.length; i += CHUNK) {
+    const chunk = upsertRows.slice(i, i + CHUNK);
     await db
       .insert(flipOpportunities)
-      .values({
-        listingId,
-        marketMedianEur: String(Math.round(c.median_eur)),
-        marketP25Eur: String(Math.round(c.p25_eur)),
-        discountPct: String(round2(discountPct)),
-        potentialGainEur: String(Math.round(potentialGain)),
-        cohortSize,
-        confidence,
-        dealScore: ds.score,
-        scoreBreakdown: ds.breakdown,
-        explainer,
-        estRecondEur: DEFAULT_RECOND_EUR,
-        estProfitEur: estProfit,
-      })
+      .values(chunk)
       .onConflictDoUpdate({
         target: flipOpportunities.listingId,
         set: {
@@ -239,8 +249,7 @@ export async function computeFlipOpportunities(): Promise<FlipComputeStats> {
           computedAt: sql`now()`,
         },
       });
-    qualifyingIds.push(listingId);
-    stats.opportunitiesUpserted++;
+    stats.opportunitiesUpserted += chunk.length;
   }
 
   // Delete stale rows — opportunities whose listing no longer qualifies.

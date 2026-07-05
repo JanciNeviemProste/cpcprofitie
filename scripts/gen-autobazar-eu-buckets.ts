@@ -15,15 +15,23 @@ const NEXT_DATA_RE = /<script id="__NEXT_DATA__" type="application\/json">([\s\S
 
 type Aggregation = { sef: string; count: number };
 
+type TrpcQuery = {
+  queryKey?: unknown[];
+  state?: { data?: { aggregations?: unknown } };
+};
+type NextDataEnvelope = {
+  props?: { pageProps?: { trpcState?: { queries?: TrpcQuery[] } } };
+};
+
 async function fetchAggs(url: string): Promise<Aggregation[]> {
   const r = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
   if (!r.ok) return [];
   const html = await r.text();
   const m = NEXT_DATA_RE.exec(html);
   if (!m) return [];
-  let data: any;
+  let data: NextDataEnvelope;
   try {
-    data = JSON.parse(m[1]!);
+    data = JSON.parse(m[1]!) as NextDataEnvelope;
   } catch {
     return [];
   }
@@ -36,7 +44,9 @@ async function fetchAggs(url: string): Promise<Aggregation[]> {
       key[1] === 'getAggregations'
     ) {
       const aggs = q?.state?.data?.aggregations;
-      if (Array.isArray(aggs)) return aggs.filter((a: any) => typeof a?.sef === 'string');
+      if (Array.isArray(aggs)) {
+        return (aggs as Aggregation[]).filter((a) => typeof a?.sef === 'string');
+      }
     }
   }
   return [];

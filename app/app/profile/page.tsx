@@ -9,8 +9,15 @@ const LOCALES = [
   { value: 'en', label: 'English (čoskoro)' },
 ];
 
+const PROVIDER_LABELS: Record<string, string> = {
+  email: 'E-mail a heslo',
+  google: 'Google OAuth',
+};
+
 export default async function ProfilePage() {
   const user = await getCurrentUser();
+  const provider = user?.app_metadata?.provider;
+  const signInMethod = provider ? (PROVIDER_LABELS[provider] ?? provider) : '—';
 
   return (
     <div className="container mx-auto px-4 py-10 sm:px-6 lg:px-8">
@@ -25,7 +32,7 @@ export default async function ProfilePage() {
           <dl className="mt-4 space-y-3 text-sm">
             <Row label="E-mail" value={user?.email ?? 'neprihlásený (UI demo)'} />
             <Row label="ID účtu" value={user?.id ?? '—'} mono />
-            <Row label="Spôsob prihlásenia" value="Google OAuth" />
+            <Row label="Spôsob prihlásenia" value={signInMethod} />
           </dl>
         </section>
 
@@ -54,19 +61,20 @@ export default async function ProfilePage() {
 
         <section className="border-border/40 bg-card/30 mt-6 rounded-xl border p-6">
           <h2 className="text-base font-semibold tracking-tight">Notifikácie</h2>
+          <p className="text-muted-foreground mt-1 text-sm">
+            E-mail alerty a digest pripravujeme — nastavenia sprístupníme po ich spustení.
+          </p>
           <div className="mt-4 space-y-3">
             <NotificationToggle
-              label="Watchlist alerty"
+              label="Watchlist alerty (čoskoro)"
               description="E-mail keď sa objaví zhoda s vašimi kritériami"
-              defaultChecked
             />
             <NotificationToggle
-              label="Týždenný digest"
+              label="Týždenný digest (čoskoro)"
               description="Súhrn pohybov v sledovaných modeloch každý pondelok"
-              defaultChecked
             />
             <NotificationToggle
-              label="Anomálie a trhový pulz"
+              label="Anomálie a trhový pulz (čoskoro)"
               description="Push pri neočakávaných cenových pohyboch (Premium)"
             />
           </div>
@@ -101,25 +109,19 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
   );
 }
 
-function NotificationToggle({
-  label,
-  description,
-  defaultChecked,
-}: {
-  label: string;
-  description: string;
-  defaultChecked?: boolean;
-}) {
+// Notification delivery isn't built yet — render the planned options
+// disabled so the UI doesn't pretend to save a preference it can't.
+function NotificationToggle({ label, description }: { label: string; description: string }) {
   return (
-    <label className="border-border/40 bg-background/30 flex items-start justify-between gap-4 rounded-lg border p-3">
+    <label className="border-border/40 bg-background/30 flex items-start justify-between gap-4 rounded-lg border p-3 opacity-60">
       <div>
         <p className="text-sm font-medium">{label}</p>
         <p className="text-muted-foreground text-xs">{description}</p>
       </div>
       <input
         type="checkbox"
-        defaultChecked={defaultChecked}
-        className="mt-0.5 size-4 cursor-pointer accent-[var(--color-primary)]"
+        disabled
+        className="mt-0.5 size-4 cursor-not-allowed accent-[var(--color-primary)]"
       />
     </label>
   );

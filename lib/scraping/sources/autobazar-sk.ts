@@ -12,7 +12,7 @@ import {
 } from '../normalize';
 import type { NormalizedListing } from '../types';
 import { detailUrl, parseDetailPage } from './autobazar-sk-detail';
-import type { ScraperSource } from './source-interface';
+import type { CheerioNode, ScraperSource } from './source-interface';
 
 const BASE = 'https://www.autobazar.sk';
 
@@ -194,7 +194,7 @@ const SK_REGIONS = [
 // with view-related class. Best-effort — undefined if nothing matches.
 function parseAbSkViewCount(
   $: cheerio.CheerioAPI,
-  $card: cheerio.Cheerio<any>,
+  $card: cheerio.Cheerio<CheerioNode>,
 ): number | undefined {
   const candidates = $card.find('[class*="view" i], [class*="zobrazen" i]');
   let result: number | undefined;
