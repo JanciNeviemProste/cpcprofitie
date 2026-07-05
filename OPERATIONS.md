@@ -21,13 +21,15 @@ V Sentry projekte → Alerts:
 
 ### Auth flow zlyháva (užívatelia sa nevedia prihlásiť)
 
-**Symptómy**: 5xx na `/auth/callback`, Sentry errors `auth_exchange_failed`,
-`/api/health` reportuje `supabase: false`.
+**Symptómy**: login/register formy vracajú "dočasne nedostupné", Vercel logy
+ukazujú `[auth] supabase error:`, `/api/health` reportuje `supabase: false`.
 
 1. `curl -s https://cpcprofit.sk/api/health | jq` — over checks.
-2. Vercel Dashboard → Logs → filter `proxy.ts` alebo `/auth/callback` za posledných 30 min.
-3. Supabase Dashboard → Authentication → Logs — chyby OAuth providera?
-4. Skontroluj že Google OAuth client ID/Secret platné, redirect URI správne.
+2. Vercel Dashboard → Logs → filter `proxy.ts` alebo `[auth]` za posledných 30 min.
+3. Supabase Dashboard → Authentication → Logs — rate limity, chyby Email providera?
+4. Skontroluj `NEXT_PUBLIC_SUPABASE_URL` / `_ANON_KEY` v Vercel env; pre
+   password reset over redirect URL (`/auth/update-password`) v Supabase →
+   Authentication → URL Configuration.
 5. **Mitigation**: ak Supabase je down, fail-closed proxy už zobrazí
    `/login?error=auth_unavailable`. Communikuj na status page.
 
@@ -38,32 +40,37 @@ token consumption.
 
 1. Vercel Dashboard → Functions → `/api/ai/listing` → Last 1h logs.
 2. Filter pre suspicious patterns (rovnaký IP, opakované requesty).
-3. Skontroluj `users` count vs AI listings vygenerované cez `events` table:
+3. Skontroluj `users` count vs AI listings vygenerované v `ai_listings` table:
    ```sql
    SELECT user_id, COUNT(*) FROM ai_listings
    WHERE created_at > now() - interval '1 hour'
    GROUP BY user_id ORDER BY count DESC LIMIT 10;
    ```
 4. **Mitigation**:
-   - Dočasne zníž per-user limit v `app/api/ai/listing/route.ts` (`limit: 30 → 10`).
+   - Per-plan mesačná quota už beží (`lib/billing/quota.ts`, usage z
+     `ai_listings` cez `lib/billing/usage.ts`) — over, že vracia 429
+     `quota_exceeded`; prípadne dočasne zníž limity plánov.
+   - Dočasne zníž per-user rate limit v `app/api/ai/listing/route.ts` (`limit: 30 → 10`).
    - Zablokuj abuser cez `users.role = 'banned'` (po pridaní enum value).
    - Najhorší scenár: `vercel env rm AI_GATEWAY_API_KEY` → flow fallback na mock.
 
-### Scraper zablokovaný (autobazar.sk vracia 403/429)
+### Scraper zablokovaný (zdroj vracia 403/429)
 
-**Symptómy**: `/api/scrape/autobazar` vracia 502, `scrape_runs` table
-ukazuje `errorMessage: "page X: HTTP 429"`, žiadne nové `listings`.
+**Symptómy**: `/api/cron/dispatch-scrape` alebo `/api/scrape/[source]` vracia
+502, `scrape_runs` table ukazuje `errorMessage: "page X: HTTP 429"`, žiadne
+nové `listings`.
 
-1. Vercel Dashboard → Functions → cron logs.
-2. Lokálne over: `pnpm tsx scripts/scrape-autobazar.ts 1`.
-3. Skontroluj `https://www.autobazar.sk/robots.txt` — zmena Disallow?
+1. Vercel Dashboard → Functions → cron logs (per-source summary v response).
+2. Lokálne over: `pnpm tsx scripts/scrape-source.ts autobazar.sk 1`.
+3. Skontroluj robots.txt daného zdroja (`autobazar.sk`, `autobazar.eu`,
+   `bazos.sk`) — zmena Disallow?
 4. **Mitigation eskalácia**:
-   - Krok 1: zvýš `delayMs` na 5000 v `scrapeAutobazarSk` options.
+   - Krok 1: zvýš `delayMs` na 5000 v `runScrape` options.
    - Krok 2: rotuj UA (zachovaj identifikáciu botu, zmeň verziu).
    - Krok 3: prepni na Apify alebo Bright Data residential proxy
      (vyžaduje rozpočet).
-   - Krok 4: pre právny problém, **STOP scraping**, kontaktuj autobazar.sk
-     business team.
+   - Krok 4: pre právny problém, **STOP scraping**, kontaktuj business team
+     daného zdroja.
 
 ### Stripe webhook nedoručené
 

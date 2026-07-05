@@ -5,6 +5,12 @@ test.describe('AI listing generator', () => {
     await page.goto('/app/ai-listing');
     await expect(page.getByRole('heading', { name: /AI generovanie inzerátu/i })).toBeVisible();
 
+    // The cookie banner overlays the submit button on first visit.
+    const dismissCookies = page.getByRole('button', { name: /Iba nevyhnutné/i });
+    if (await dismissCookies.isVisible()) {
+      await dismissCookies.click();
+    }
+
     await page.getByRole('button', { name: /Vygenerovať inzerát/i }).click();
     await expect(page.getByText(/Demo režim/i)).toBeVisible({ timeout: 15_000 });
     // The mock stream emits the user-supplied make+model verbatim.

@@ -5,7 +5,7 @@ máš všetky účty pripravené.
 
 ## 0. Pre-requisites
 
-- Vercel účet — **Pro plán je potrebný** ak chceš sub-daily cron (`0 */6 * * *` v `vercel.ts`). Hobby/Free limit je 1 cron/deň → import na Hobby zlyhá s "Hobby accounts are limited to daily cron jobs". Pre Hobby buď upgrade alebo zmeň cron na `0 4 * * *` (1× denne). Vercel Queues a Sandbox tiež vyžadujú Pro.
+- Vercel účet — **Pro plán je potrebný** ak chceš sub-daily cron (`0 */6 * * *` pre dispatch-scrape vo `vercel.json`; celkovo je tam 5 cron jobov). Hobby/Free limit je 1 cron/deň → import na Hobby zlyhá s "Hobby accounts are limited to daily cron jobs". Pre Hobby buď upgrade alebo zredukuj crony vo `vercel.json` na 1× denne.
 - Stripe účet (Test mode na začiatku)
 - Resend účet (transakčný e-mail)
 - Sentry účet (alebo skip — Sentry je optional)
@@ -78,22 +78,27 @@ Webhook endpoint:
 
 Customer Portal aktivuj v Stripe → Settings → Billing → Customer portal.
 
-## 5. Supabase Auth — Google OAuth
+## 5. Supabase Auth — e-mail + heslo
 
-V Supabase Dashboard → Authentication → Providers → **Google**:
-- Client ID + Secret z [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
-  → OAuth 2.0 Client → Web application
-- **Authorized redirect URI**: `<SUPABASE_URL>/auth/v1/callback`
-- V Google Cloud OAuth consent → Add scope: `email`, `profile`, `openid`
+Auth je čisto e-mail + heslo (server actions v `lib/auth/actions.ts`) — žiadny
+OAuth provider netreba konfigurovať.
 
-App-side redirect po login: `https://cpcprofit.sk/auth/callback`. Auto-handled.
+V Supabase Dashboard → Authentication → Providers → **Email**:
+- Provider je enabled by default.
+- **Vypni "Confirm email"** aby sa user mohol prihlásiť hneď po registrácii.
+  (Ak ho necháš zapnutý, uprav post-register UX na "skontrolujte si schránku".)
+
+Password reset flow je app-side: `/auth/reset-password` pošle e-mail cez
+`resetPasswordForEmail()` s redirectom na `/auth/update-password`. Over v
+Supabase → Authentication → URL Configuration, že `https://cpcprofit.sk` je
+povolená redirect URL.
 
 ## 6. Pull env + apply DB schéma
 
 ```bash
 vercel env pull .env.local                # stiahni env zo všetkých prostredí
 pnpm install
-pnpm drizzle-kit push                     # vytvor 11 tabuliek + 6 enums
+pnpm drizzle-kit push                     # vytvor 15 tabuliek + 8 enums
 pnpm tsx scripts/seed-vehicles.ts         # 50+ canonical SK modelov
 ```
 
@@ -108,7 +113,7 @@ curl -s http://localhost:3000/api/health | jq
 
 Otvor http://localhost:3000, prejdi:
 - [ ] Landing renders
-- [ ] /login → Google OAuth flow funguje, redirect na /app/overview
+- [ ] /register → účet vznikne, redirect na /app/overview; /login → e-mail + heslo funguje
 - [ ] /app/ai-listing → form submit streamuje real Claude response (`x-cpcprofit-mode: live`)
 - [ ] /app/billing → klikni "Upraviť plán" → Stripe Checkout → test card `4242 4242 4242 4242`
 - [ ] Po platbe webhook upsertne `subscriptions` row, /app/billing zobrazí Plus
@@ -121,7 +126,9 @@ git push origin main
 vercel deploy --prod         # alebo Vercel Dashboard → Promote to Production
 ```
 
-Prvý prod deploy aktivuje Cron jobs (`/api/cron/dispatch-scrape` každých 6h).
+Prvý prod deploy aktivuje Cron jobs z `vercel.json`: `dispatch-scrape`
+(každých 6h), `weekly-maintenance` (Ne 02:00), `check-removed` (03:00 denne),
+`daily-price-snapshot` (04:00 denne), `detect-sold` (05:00 denne).
 
 ## 9. Domain bind
 

@@ -44,8 +44,9 @@ Nikdy nepoužívajte `--no-verify` ani `--amend` na publikované commity.
   `__tests__/`).
 - **API routes**: zod-validovaný input + integration test s mockovaným
   externým providerom.
-- **UI**: manual click-through pred PR; po launchi pridáme Playwright E2E
-  pre signup → checkout → use feature flow.
+- **UI**: manual click-through pred PR; Playwright E2E žije v `e2e/`
+  (`pnpm test:e2e`) — pokrýva marketing, auth UI, app moduly, deals,
+  AI listing a cookies banner.
 - **Snapshot testy nie sú povolené** — ľahko sa stávajú technickým dlhom.
 
 ## Bezpečnostné guardrails
