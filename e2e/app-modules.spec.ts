@@ -58,13 +58,16 @@ test.describe('App modules', () => {
 
   test('admin scrape-runs is hidden from non-admins', async ({ page }) => {
     // Anonymous + Supabase env → proxy redirects to /login. Otherwise the
-    // page itself must 404 for anyone not on ADMIN_EMAILS — visitors never
-    // learn the page exists.
-    const response = await page.goto('/app/admin/scrape-runs');
+    // page calls notFound() for anyone not on ADMIN_EMAILS. Note: on dynamic
+    // pages Next streams the shell with 200 before notFound() resolves, so
+    // assert the rendered 404 UI (and no leaked admin content), not the
+    // HTTP status.
+    await page.goto('/app/admin/scrape-runs');
     if (page.url().includes('/login')) {
       await expect(page).toHaveURL(/login/);
     } else {
-      expect(response?.status()).toBe(404);
+      await expect(page.getByRole('heading', { name: /Stránka neexistuje/i })).toBeVisible();
+      await expect(page.getByRole('heading', { name: /Scrape behy/i })).toHaveCount(0);
     }
   });
 });
