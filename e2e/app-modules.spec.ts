@@ -36,13 +36,25 @@ test.describe('App modules', () => {
   // Auth-gated pages: with Supabase env present the proxy redirects
   // anonymous visitors to /login; without it (CI) the request falls through
   // and the page renders for a null user. Both are correct — assert per-world.
-  test('garage is login-gated or renders with a disabled add button', async ({ page }) => {
+  test('garage is login-gated or prompts anonymous visitors to log in', async ({ page }) => {
     await page.goto('/app/garage');
     if (page.url().includes('/login')) {
       await expect(page).toHaveURL(/next=%2Fapp%2Fgarage/);
     } else {
+      // Fail-open world (no Supabase env): page renders for a null user with
+      // a login prompt instead of the add form.
       await expect(page.getByRole('heading', { name: /Moja garáž/i })).toBeVisible();
-      await expect(page.getByRole('button', { name: /Pridať vozidlo/i })).toBeDisabled();
+      await expect(page.getByRole('link', { name: /Prihláste sa/i })).toBeVisible();
+    }
+  });
+
+  test('watchlist is login-gated or prompts anonymous visitors to log in', async ({ page }) => {
+    await page.goto('/app/watchlist');
+    if (page.url().includes('/login')) {
+      await expect(page).toHaveURL(/next=%2Fapp%2Fwatchlist/);
+    } else {
+      await expect(page.getByRole('heading', { name: /Sledované modely/i })).toBeVisible();
+      await expect(page.getByRole('link', { name: /Prihláste sa/i })).toBeVisible();
     }
   });
 

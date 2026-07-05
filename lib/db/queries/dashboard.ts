@@ -185,6 +185,7 @@ export type WatchlistRow = {
   region: string | null;
   maxPriceEur: number | null;
   minYear: number | null;
+  notifyByEmail: boolean;
 };
 
 export async function getWatchlistEntries(userId: string): Promise<WatchlistRow[]> {
@@ -204,6 +205,7 @@ async function getWatchlistEntriesUnsafe(userId: string): Promise<WatchlistRow[]
       region: watchlist.region,
       maxPriceEur: watchlist.maxPriceEur,
       minYear: watchlist.minYear,
+      notifyByEmail: watchlist.notifyByEmail,
       modelSlug: vehicleModels.slug,
       modelName: vehicleModels.name,
       makeName: vehicleMakes.name,
@@ -221,5 +223,6 @@ async function getWatchlistEntriesUnsafe(userId: string): Promise<WatchlistRow[]
     region: r.region,
     maxPriceEur: r.maxPriceEur != null ? Number(r.maxPriceEur) : null,
     minYear: r.minYear,
+    notifyByEmail: r.notifyByEmail,
   }));
 }
