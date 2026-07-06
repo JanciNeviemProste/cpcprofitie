@@ -1,22 +1,31 @@
 // Drive /api/cron/enrich-source in a loop until done. Reads CRON_SECRET
 // from .env.local (never logs it). Run with:
 //   node scripts/trigger-enrich-loop.mjs <source>
+//   node scripts/trigger-enrich-loop.mjs autobazar.sk --mode=null-price
+//     ^ price backfill: re-fetch detail pages for active listings still
+//       missing a price. Loops until the whole set is walked once; re-run to
+//       retry any rows whose detail yielded no price.
 
 import { readFileSync } from 'node:fs';
 
 const source = process.argv[2];
 if (!source) {
-  console.error('usage: node scripts/trigger-enrich-loop.mjs <source> [--partition=K --modulo=N]');
+  console.error(
+    'usage: node scripts/trigger-enrich-loop.mjs <source> [--mode=null-price] [--partition=K --modulo=N]',
+  );
   process.exit(2);
 }
 // Optional partitioning so N shells split the backlog by id % modulo.
 let partition;
 let modulo;
+let mode;
 for (const arg of process.argv.slice(3)) {
   const p = /^--partition=(\d+)$/.exec(arg);
   const m = /^--modulo=(\d+)$/.exec(arg);
+  const md = /^--mode=(null-price|unenriched)$/.exec(arg);
   if (p) partition = Number(p[1]);
   if (m) modulo = Number(m[1]);
+  if (md) mode = md[1];
 }
 const partitionTag = partition != null && modulo != null ? `[${partition}/${modulo}]` : '';
 
@@ -48,9 +57,11 @@ async function callOnce() {
         Authorization: 'Bearer ' + secret,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(
-        partition != null && modulo != null ? { source, partition, modulo } : { source },
-      ),
+      body: JSON.stringify({
+        source,
+        ...(partition != null && modulo != null ? { partition, modulo } : {}),
+        ...(mode ? { mode } : {}),
+      }),
       signal: ac.signal,
     });
     const text = await res.text();
