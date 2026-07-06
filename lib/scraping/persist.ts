@@ -86,7 +86,7 @@ async function ensureMakeId(makeSlug: string): Promise<number | null> {
   }
 }
 
-async function ensureModelId(
+export async function ensureModelId(
   makeSlug: string | null,
   modelSlug: string | null,
   displayName: string | null,
