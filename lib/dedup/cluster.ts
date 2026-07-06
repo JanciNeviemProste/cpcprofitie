@@ -42,36 +42,34 @@ export async function clusterReposts(opts: {
 
   // ── Pass 1: VIN-based clustering ──
   // For every VIN that appears on 2+ listings, pick the oldest as canonical
-  // and point every other listing in the cluster at it.
+  // and point every other listing in the cluster at it. Window functions
+  // (PARTITION BY vin) instead of a correlated LATERAL — the LATERAL was
+  // O(n²) and timed out on a full-corpus recluster; this is O(n log n).
   const vinClusters = await db.execute(sql`
-    WITH vin_groups AS (
+    WITH vin_members AS (
       SELECT
+        l.id,
         d.vin,
-        MIN(l.id) FILTER (WHERE l.first_seen_at = grp.oldest) AS canonical_id,
-        ARRAY_AGG(l.id) AS member_ids
+        FIRST_VALUE(l.id) OVER (
+          PARTITION BY d.vin ORDER BY l.first_seen_at ASC, l.id ASC
+        ) AS canonical_id,
+        COUNT(*) OVER (PARTITION BY d.vin) AS grp_size
       FROM ${listings} l
       JOIN ${listingDetails} d ON d.listing_id = l.id
-      JOIN LATERAL (
-        SELECT MIN(l2.first_seen_at) AS oldest
-        FROM ${listings} l2
-        JOIN ${listingDetails} d2 ON d2.listing_id = l2.id
-        WHERE d2.vin = d.vin
-      ) grp ON true
       WHERE d.vin IS NOT NULL AND LENGTH(d.vin) = 17
-      GROUP BY d.vin, grp.oldest
-      HAVING COUNT(*) > 1
     ),
     updates AS (
       UPDATE ${listings} l
-      SET canonical_listing_id = vg.canonical_id
-      FROM vin_groups vg
-      WHERE l.id = ANY(vg.member_ids)
-        AND l.id <> vg.canonical_id
-        AND (l.canonical_listing_id IS DISTINCT FROM vg.canonical_id)
+      SET canonical_listing_id = vm.canonical_id
+      FROM vin_members vm
+      WHERE l.id = vm.id
+        AND vm.grp_size > 1
+        AND l.id <> vm.canonical_id
+        AND (l.canonical_listing_id IS DISTINCT FROM vm.canonical_id)
       RETURNING l.id
     )
     SELECT
-      (SELECT COUNT(*) FROM vin_groups) AS clusters,
+      (SELECT COUNT(DISTINCT vin) FROM vin_members WHERE grp_size > 1) AS clusters,
       (SELECT COUNT(*) FROM updates) AS clones_assigned
   `);
   const vinRow = (vinClusters as unknown as Array<Record<string, unknown>>)[0] as
