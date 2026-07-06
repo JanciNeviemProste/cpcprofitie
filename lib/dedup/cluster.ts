@@ -200,6 +200,22 @@ export async function backfillFingerprints(opts: { limit?: number } = {}): Promi
   return updated;
 }
 
+/**
+ * Reset all repost clustering (canonical_listing_id → NULL). Used before a
+ * full re-cluster to clear false-merges formed under the old (unguarded)
+ * fingerprint pass. Returns rows reset. clusterReposts is idempotent, so
+ * reset + clusterReposts recomputes the whole graph with the current guard.
+ */
+export async function resetCanonical(): Promise<number> {
+  const db = getDb();
+  const res = await db.execute(sql`
+    UPDATE ${listings} SET canonical_listing_id = NULL
+    WHERE canonical_listing_id IS NOT NULL
+    RETURNING id
+  `);
+  return (res as unknown as unknown[]).length;
+}
+
 /** Count active canonical listings (not sold, not removed, not a repost-clone). */
 export async function countActiveCanonical(): Promise<number> {
   const db = getDb();
