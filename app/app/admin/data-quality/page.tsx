@@ -60,12 +60,13 @@ export default async function DataQualityAdminPage() {
               <Th right>Model</Th>
               <Th right>Kohort-ready</Th>
               <Th right>Outlier ceny/km</Th>
+              <Th>Stav</Th>
             </tr>
           </thead>
           <tbody>
             {report.completeness.length === 0 ? (
               <tr>
-                <td colSpan={12} className="text-muted-foreground px-4 py-8 text-center">
+                <td colSpan={13} className="text-muted-foreground px-4 py-8 text-center">
                   Zatiaľ žiadne dáta.
                 </td>
               </tr>
@@ -86,6 +87,9 @@ export default async function DataQualityAdminPage() {
                   <Td className={r.outlierPrice + r.outlierMileage > 0 ? 'text-amber-500' : ''}>
                     {r.outlierPrice} / {r.outlierMileage}
                   </Td>
+                  <td className="px-4 py-3">
+                    <HealthBadge health={r.health} reason={r.healthReason} />
+                  </td>
                 </tr>
               ))
             )}
@@ -130,6 +134,28 @@ export default async function DataQualityAdminPage() {
         </table>
       </div>
     </div>
+  );
+}
+
+function HealthBadge({
+  health,
+  reason,
+}: {
+  health: 'ok' | 'warn' | 'drift';
+  reason: string | null;
+}) {
+  const cfg = {
+    ok: { label: '🟢 OK', cls: 'bg-chart-3/15 text-chart-3' },
+    warn: { label: '🟡 Pozor', cls: 'bg-amber-500/15 text-amber-500' },
+    drift: { label: '🔴 Drift?', cls: 'bg-destructive/15 text-destructive' },
+  }[health];
+  return (
+    <span
+      title={reason ?? undefined}
+      className={`inline-flex whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-medium ${cfg.cls}`}
+    >
+      {cfg.label}
+    </span>
   );
 }
 

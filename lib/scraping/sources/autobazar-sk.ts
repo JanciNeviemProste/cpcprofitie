@@ -61,13 +61,17 @@ export function parseListingsPage(html: string): NormalizedListing[] {
     // Climb to a reasonable card-sized parent so we capture surrounding
     // text (price, meta line). 2 levels works for current layout.
     const $anchor = $(el);
-    // Scope cardText to the nearest article/li/tr/section wrapper so we don't
-    // bleed price/year text from neighbouring cards. Fallback to the direct
-    // parent when no semantic wrapper exists.
-    const $card =
-      $anchor.closest('article, li, tr, section').length > 0
-        ? $anchor.closest('article, li, tr, section')
-        : $anchor.parent();
+    // Scope cardText to the card wrapper so we don't bleed price/year text
+    // from neighbouring cards. autobazar.sk renders each result as
+    // `<div class="item">…<div class="item-teaser">`; earlier this only
+    // looked for article/li/tr/section (absent on the site), fell back to the
+    // shallow parent, and so captured no price/year/km/region — hence the
+    // 100% null price the data-quality report surfaced. `.item` is the whole
+    // card; keep the semantic tags + parent as fallbacks for layout changes.
+    const $card = (() => {
+      const $c = $anchor.closest('.item, .item-teaser, article, li, tr, section');
+      return $c.length > 0 ? $c : $anchor.parent();
+    })();
     // Autobazar.sk doesn't put titles on anchors or in anchor text — they live
     // in `<img alt="Mercedes-Benz EQA 350 4Matic, 08-2024, …">` inside the card.
     // Fall back through: anchor title → anchor text → first non-empty img alt.
@@ -79,14 +83,23 @@ export function parseListingsPage(html: string): NormalizedListing[] {
     const titleFromSlug = match[2] ? slugToTitle(match[2]) : '';
     const title = titleFromAttr || titleFromText || titleFromImg || titleFromSlug || null;
     const cardText = $card.text();
+    // The card layout is: title · meta line (year · gearbox · km · kraj) ·
+    // price · equipment list. The equipment list ("elektrické okná",
+    // "manuálna klimatizácia") sits AFTER the "€" and would false-positive
+    // fuel/transmission word-hints, so scan only the pre-price meta portion
+    // for everything except the price itself.
+    const metaText = cardText.split('€')[0] ?? cardText;
 
     const { makeSlug, modelSlug } = parseMakeModel(title);
     const priceEur = extractEurFromText(cardText);
-    const year = extractYearFromText(cardText);
-    const mileageKm = extractKmFromText(cardText);
-    const fuel = parseFuel(extractFuelHintFromText(cardText));
-    const transmission = parseTransmission(extractTransmissionHintFromText(cardText));
-    const region = prefixRegion(extractRegionHint(cardText), 'SK');
+    const year = extractYearFromText(metaText);
+    const mileageKm = extractKmFromText(metaText);
+    // Fuel: the engine badge in the title ("2.0 TDI") is the most reliable
+    // signal; fall back to a fuel word in the meta line (not equipment).
+    const fuel =
+      fuelFromEngineCode(title ?? '') ?? parseFuel(extractFuelHintFromText(metaText));
+    const transmission = parseTransmission(extractTransmissionHintFromText(metaText));
+    const region = prefixRegion(extractRegionHint(metaText), 'SK');
 
     // Engagement signals (best-effort: list page rarely exposes these; detail
     // enrichment fills in the rest). isFeatured fires on the VIP/TOP card
@@ -177,8 +190,9 @@ export const autobazarSk: ScraperSource = {
   parseDetailPage,
 };
 
-// Best-effort region hint — Slovak `kraj` names typically appear in the card
-// footer. We do not crash if absent.
+// Region on autobazar.sk cards is rendered as a kraj-capital plate code plus
+// "kraj" — e.g. "NR kraj", "BA kraj". Map the 8 codes to the full kraj name so
+// downstream SK_KRAJE ILIKE matching (lib/data/sk-regions.ts) resolves it.
 const SK_REGIONS = [
   'Bratislavský',
   'Trnavský',
@@ -189,6 +203,30 @@ const SK_REGIONS = [
   'Prešovský',
   'Košický',
 ];
+
+const KRAJ_CODE_TO_NAME: Record<string, string> = {
+  BA: 'Bratislavský',
+  TT: 'Trnavský',
+  TN: 'Trenčiansky',
+  NR: 'Nitriansky',
+  ZA: 'Žilinský',
+  BB: 'Banskobystrický',
+  PO: 'Prešovský',
+  KE: 'Košický',
+};
+
+const KRAJ_CODE_RE = /\b([A-ZŽ]{2})\s+kraj\b/;
+
+// Engine-badge → fuel. Conservative: only well-known diesel/petrol markers.
+// TDI/CDI/HDi/dCi/CRDi/BlueTEC = diesel; TSI/TFSI/T-GDI/MPI = petrol.
+const DIESEL_BADGE_RE = /\b(tdi|cdi|hdi|dci|crdi|bluetec|d-4d|dtr|jtd)\b/i;
+const PETROL_BADGE_RE = /\b(tsi|tfsi|t-gdi|tgdi|mpi|vti|thp|fsi)\b/i;
+
+function fuelFromEngineCode(text: string): 'diesel' | 'gasoline' | null {
+  if (DIESEL_BADGE_RE.test(text)) return 'diesel';
+  if (PETROL_BADGE_RE.test(text)) return 'gasoline';
+  return null;
+}
 
 // View counter is occasionally rendered as "Zobrazení: 123" or in an element
 // with view-related class. Best-effort — undefined if nothing matches.
@@ -228,6 +266,10 @@ function parseAbSkPhone(text: string | null | undefined): string | undefined {
 }
 
 function extractRegionHint(text: string): string | null {
+  // Preferred: "NR kraj" → Nitriansky (the live card format).
+  const code = KRAJ_CODE_RE.exec(text);
+  if (code && KRAJ_CODE_TO_NAME[code[1]!]) return KRAJ_CODE_TO_NAME[code[1]!]!;
+  // Fallback: a full kraj name spelled out (older layout / detail pages).
   for (const r of SK_REGIONS) {
     if (text.includes(r)) return r;
   }

@@ -13,6 +13,8 @@ import { getDb } from '../index';
 // exactly what gets excluded downstream.
 import { MILEAGE_MAX, PRICE_MAX, PRICE_MIN } from '@/lib/analytics/quality';
 
+export type SourceHealth = 'ok' | 'warn' | 'drift';
+
 export type SourceCompleteness = {
   source: string;
   total: number;
@@ -28,7 +30,35 @@ export type SourceCompleteness = {
   outlierMileage: number;
   // Share of active listings carrying every field a DealScore cohort needs.
   cohortReadyPct: number;
+  // Coarse health verdict for at-a-glance drift detection: a source whose
+  // price or model coverage cratered almost always means a broken selector,
+  // not a market shift. This is what would have flagged the autobazar.sk
+  // 100%-null-price regression within a day instead of months.
+  health: SourceHealth;
+  healthReason: string | null;
 };
+
+// A price collapse is the strongest selector-drift signal (real markets never
+// stop listing prices); model/region collapse is the next tier.
+function assessHealth(c: {
+  nullPricePct: number;
+  nullModelPct: number;
+  nullRegionPct: number;
+}): { health: SourceHealth; healthReason: string | null } {
+  if (c.nullPricePct >= 60) {
+    return { health: 'drift', healthReason: `cena chýba ${c.nullPricePct}% — možný drift selektora` };
+  }
+  if (c.nullModelPct >= 70) {
+    return { health: 'drift', healthReason: `model chýba ${c.nullModelPct}% — parser/enrichment` };
+  }
+  if (c.nullPricePct >= 30 || c.nullRegionPct >= 60 || c.nullModelPct >= 50) {
+    return { health: 'warn', healthReason: 'zvýšená chýbovosť kľúčových polí' };
+  }
+  return { health: 'ok', healthReason: null };
+}
+
+/** Test seam — the health verdict is pure logic worth locking down. */
+export const assessHealthForTest = assessHealth;
 
 export type EnrichmentCoverage = {
   source: string;
@@ -106,21 +136,29 @@ export async function getDataQualityReport(): Promise<DataQualityReport> {
       cohort_ready: number;
     }>;
 
-    const completeness: SourceCompleteness[] = completenessRows.map((r) => ({
-      source: r.source,
-      total: r.total,
-      active: r.active,
-      nullPricePct: pct(r.null_price, r.total),
-      nullYearPct: pct(r.null_year, r.total),
-      nullMileagePct: pct(r.null_mileage, r.total),
-      nullFuelPct: pct(r.null_fuel, r.total),
-      nullTransmissionPct: pct(r.null_transmission, r.total),
-      nullRegionPct: pct(r.null_region, r.total),
-      nullModelPct: pct(r.null_model, r.total),
-      outlierPrice: r.outlier_price,
-      outlierMileage: r.outlier_mileage,
-      cohortReadyPct: pct(r.cohort_ready, r.active),
-    }));
+    const completeness: SourceCompleteness[] = completenessRows.map((r) => {
+      const nullPricePct = pct(r.null_price, r.total);
+      const nullRegionPct = pct(r.null_region, r.total);
+      const nullModelPct = pct(r.null_model, r.total);
+      const { health, healthReason } = assessHealth({ nullPricePct, nullModelPct, nullRegionPct });
+      return {
+        source: r.source,
+        total: r.total,
+        active: r.active,
+        nullPricePct,
+        nullYearPct: pct(r.null_year, r.total),
+        nullMileagePct: pct(r.null_mileage, r.total),
+        nullFuelPct: pct(r.null_fuel, r.total),
+        nullTransmissionPct: pct(r.null_transmission, r.total),
+        nullRegionPct,
+        nullModelPct,
+        outlierPrice: r.outlier_price,
+        outlierMileage: r.outlier_mileage,
+        cohortReadyPct: pct(r.cohort_ready, r.active),
+        health,
+        healthReason,
+      };
+    });
 
     const enrichmentRows = (await db.execute(sql`
       SELECT
