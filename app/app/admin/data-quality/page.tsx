@@ -42,6 +42,29 @@ export default async function DataQualityAdminPage() {
         <Stat label="Ø veľkosť kohortu" value={report.dealScore.avgCohortSize?.toString() ?? '—'} />
       </div>
 
+      {/* Dedup health */}
+      <h2 className="mt-10 text-base font-semibold tracking-tight">Deduplikácia repostov</h2>
+      <div className="mt-3 grid gap-4 sm:grid-cols-4">
+        <Stat
+          label="Reposty (klony)"
+          value={`${report.dedup.repostClones.toLocaleString('sk-SK')} · ${report.dedup.repostPct}%`}
+        />
+        <Stat label="VIN pokrytie" value={`${report.dedup.vinCoveragePct}%`} />
+        <Stat
+          label="Najväčší klaster"
+          value={report.dedup.maxClusterSize.toString()}
+        />
+        <Stat
+          label="Cross-source VIN"
+          value={report.dedup.crossSourceVinClusters.toLocaleString('sk-SK')}
+        />
+      </div>
+      <p className="text-muted-foreground mt-2 text-xs">
+        Reposty (zmazané + znovu pridané inzeráty) sú napojené na kanonický záznam a vylúčené zo
+        všetkých metrík. „Najväčší klaster“ je poistka proti nad-zlučovaniu — nezmyselne veľká
+        hodnota by znamenala false-merge.
+      </p>
+
       {/* Completeness */}
       <h2 className="mt-10 text-base font-semibold tracking-tight">Completeness (% chýbajúcich)</h2>
       <div className="border-border/40 mt-3 overflow-x-auto rounded-xl border">

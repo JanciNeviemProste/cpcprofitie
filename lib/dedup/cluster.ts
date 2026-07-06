@@ -96,6 +96,14 @@ export async function clusterReposts(opts: {
       WHERE l.fingerprint IS NOT NULL
         AND l.canonical_listing_id IS NULL
         AND l.first_seen_at > now() - (${windowDays}::int * interval '1 day')
+        -- Only cluster well-identified listings that carry a per-car
+        -- discriminator. Without a model AND a photo, the fingerprint collapses
+        -- to a near-constant (unknown|…|no-photo) and would false-merge
+        -- distinct cars (e.g. a dealer's several same-spec cars, or title-less
+        -- stubs). A genuine repost re-uploads the same photo → same basename →
+        -- still clusters, so this only removes false merges.
+        AND l.model_id IS NOT NULL
+        AND EXISTS (SELECT 1 FROM listing_photos p WHERE p.listing_id = l.id)
       GROUP BY l.fingerprint
       HAVING COUNT(*) > 1
     ),

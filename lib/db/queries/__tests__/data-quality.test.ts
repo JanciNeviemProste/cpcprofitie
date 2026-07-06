@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assessHealthForTest,
+  computeRepostPct,
   pickDriftAlerts,
   type DataQualityReport,
 } from '../data-quality';
@@ -41,6 +42,15 @@ function report(
     completeness: completeness.map((c) => ({ ...c }) as never),
     enrichment: [],
     dealScore: { activeCanonical: 0, flipRows: 0, withDealScore: 0, avgCohortSize: null },
+    dedup: {
+      total: 0,
+      canonical: 0,
+      repostClones: 0,
+      repostPct: 0,
+      vinCoveragePct: 0,
+      maxClusterSize: 0,
+      crossSourceVinClusters: 0,
+    },
   };
 }
 
@@ -62,5 +72,16 @@ describe('pickDriftAlerts', () => {
     expect(
       pickDriftAlerts(report([{ source: 'x', health: 'ok', healthReason: null }])),
     ).toEqual([]);
+  });
+});
+
+describe('computeRepostPct', () => {
+  it('is the clone share of the whole corpus, one decimal', () => {
+    expect(computeRepostPct(250, 1000)).toBe(25);
+    expect(computeRepostPct(1, 3)).toBe(33.3);
+  });
+
+  it('is 0 for an empty corpus (no divide-by-zero)', () => {
+    expect(computeRepostPct(0, 0)).toBe(0);
   });
 });

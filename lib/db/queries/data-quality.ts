@@ -92,12 +92,30 @@ export type DealScoreHealth = {
   avgCohortSize: number | null;
 };
 
+export type DedupHealth = {
+  total: number;
+  canonical: number;
+  repostClones: number;
+  repostPct: number;
+  vinCoveragePct: number;
+  // Largest repost cluster (clones sharing one canonical). A wild value flags
+  // over-clustering (the false-merge symptom the guard prevents).
+  maxClusterSize: number;
+  // VINs seen on 2+ sources — the same car cross-posted, deduped by the VIN pass.
+  crossSourceVinClusters: number;
+};
+
 export type DataQualityReport = {
   generatedAt: string;
   completeness: SourceCompleteness[];
   enrichment: EnrichmentCoverage[];
   dealScore: DealScoreHealth;
+  dedup: DedupHealth;
 };
+
+export function computeRepostPct(repostClones: number, total: number): number {
+  return pct(repostClones, total);
+}
 
 function pct(part: number, whole: number): number {
   if (whole <= 0) return 0;
@@ -237,9 +255,58 @@ export async function getDataQualityReport(): Promise<DataQualityReport> {
       avgCohortSize: d?.avg_cohort_size != null ? Math.round(d.avg_cohort_size * 10) / 10 : null,
     };
 
-    return { generatedAt, completeness, enrichment, dealScore };
+    const dedupRows = (await db.execute(sql`
+      SELECT
+        (SELECT COUNT(*) FROM listings)::int AS total,
+        (SELECT COUNT(*) FROM listings WHERE canonical_listing_id IS NULL)::int AS canonical,
+        (SELECT COUNT(*) FROM listings WHERE canonical_listing_id IS NOT NULL)::int AS repost_clones,
+        (SELECT COUNT(*) FROM listing_details WHERE vin IS NOT NULL AND LENGTH(vin) = 17)::int AS with_vin,
+        (SELECT COALESCE(MAX(cnt), 0) FROM (
+          SELECT COUNT(*) AS cnt FROM listings
+          WHERE canonical_listing_id IS NOT NULL GROUP BY canonical_listing_id
+        ) g)::int AS max_cluster_clones,
+        (SELECT COUNT(*) FROM (
+          SELECT d2.vin FROM listing_details d2 JOIN listings l2 ON l2.id = d2.listing_id
+          WHERE d2.vin IS NOT NULL AND LENGTH(d2.vin) = 17
+          GROUP BY d2.vin HAVING COUNT(DISTINCT l2.source) > 1
+        ) x)::int AS cross_source_vin
+    `)) as unknown as Array<{
+      total: number;
+      canonical: number;
+      repost_clones: number;
+      with_vin: number;
+      max_cluster_clones: number;
+      cross_source_vin: number;
+    }>;
+    const dr = dedupRows[0];
+    const dedup: DedupHealth = {
+      total: dr?.total ?? 0,
+      canonical: dr?.canonical ?? 0,
+      repostClones: dr?.repost_clones ?? 0,
+      repostPct: computeRepostPct(dr?.repost_clones ?? 0, dr?.total ?? 0),
+      vinCoveragePct: pct(dr?.with_vin ?? 0, dr?.total ?? 0),
+      // +1 so the count includes the canonical itself (cluster = canonical + clones).
+      maxClusterSize: (dr?.max_cluster_clones ?? 0) > 0 ? (dr?.max_cluster_clones ?? 0) + 1 : 0,
+      crossSourceVinClusters: dr?.cross_source_vin ?? 0,
+    };
+
+    return { generatedAt, completeness, enrichment, dealScore, dedup };
   } catch (e) {
     Sentry.captureException(e, { tags: { component: 'data-quality', step: 'getDataQualityReport' } });
-    return { generatedAt, completeness: [], enrichment: [], dealScore: { activeCanonical: 0, flipRows: 0, withDealScore: 0, avgCohortSize: null } };
+    return {
+      generatedAt,
+      completeness: [],
+      enrichment: [],
+      dealScore: { activeCanonical: 0, flipRows: 0, withDealScore: 0, avgCohortSize: null },
+      dedup: {
+        total: 0,
+        canonical: 0,
+        repostClones: 0,
+        repostPct: 0,
+        vinCoveragePct: 0,
+        maxClusterSize: 0,
+        crossSourceVinClusters: 0,
+      },
+    };
   }
 }
