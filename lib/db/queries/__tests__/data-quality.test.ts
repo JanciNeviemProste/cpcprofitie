@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { assessHealthForTest } from '../data-quality';
+import {
+  assessHealthForTest,
+  pickDriftAlerts,
+  type DataQualityReport,
+} from '../data-quality';
 
 // Guards the selector-drift detection thresholds — if someone loosens these,
 // the autobazar.sk-style 100%-null-price regression would stop flagging.
@@ -25,5 +29,38 @@ describe('assessHealth', () => {
     const r = assessHealthForTest({ nullPricePct: 8, nullModelPct: 13, nullRegionPct: 8 });
     expect(r.health).toBe('ok');
     expect(r.healthReason).toBeNull();
+  });
+});
+
+function report(
+  completeness: Array<{ source: string; health: 'ok' | 'warn' | 'drift'; healthReason: string | null }>,
+): DataQualityReport {
+  return {
+    generatedAt: '2026-07-06T00:00:00.000Z',
+    // Only the fields pickDriftAlerts reads matter; cast the rest.
+    completeness: completeness.map((c) => ({ ...c }) as never),
+    enrichment: [],
+    dealScore: { activeCanonical: 0, flipRows: 0, withDealScore: 0, avgCohortSize: null },
+  };
+}
+
+describe('pickDriftAlerts', () => {
+  it('returns only non-ok sources with a reason', () => {
+    const alerts = pickDriftAlerts(
+      report([
+        { source: 'autobazar.sk', health: 'drift', healthReason: 'cena chýba 100%' },
+        { source: 'bazos.sk', health: 'warn', healthReason: 'zvýšená chýbovosť' },
+        { source: 'autobazar.eu', health: 'ok', healthReason: null },
+      ]),
+    );
+    expect(alerts).toHaveLength(2);
+    expect(alerts.map((a) => a.source)).toEqual(['autobazar.sk', 'bazos.sk']);
+    expect(alerts[0]!.reason).toContain('cena');
+  });
+
+  it('is empty when everything is ok', () => {
+    expect(
+      pickDriftAlerts(report([{ source: 'x', health: 'ok', healthReason: null }])),
+    ).toEqual([]);
   });
 });

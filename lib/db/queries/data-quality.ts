@@ -60,6 +60,22 @@ function assessHealth(c: {
 /** Test seam — the health verdict is pure logic worth locking down. */
 export const assessHealthForTest = assessHealth;
 
+export type DriftAlert = { source: string; health: SourceHealth; reason: string };
+
+/**
+ * Pick the sources worth alerting on from a report — anything not `ok`.
+ * Pure so the cron's decision is unit-testable without a DB.
+ */
+export function pickDriftAlerts(report: DataQualityReport): DriftAlert[] {
+  return report.completeness
+    .filter((c) => c.health !== 'ok')
+    .map((c) => ({
+      source: c.source,
+      health: c.health,
+      reason: c.healthReason ?? 'zvýšená chýbovosť',
+    }));
+}
+
 export type EnrichmentCoverage = {
   source: string;
   active: number;
