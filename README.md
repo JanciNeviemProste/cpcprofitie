@@ -120,7 +120,9 @@ prázdne výsledky, AI form demo stream) alebo sa vypnú.
 | `EMAIL_FROM` | From adresa notifikácií (default `CPCProfit <onboarding@resend.dev>`) | vlastná doména v Resend |
 | `BLOB_READ_WRITE_TOKEN` | Vercel Blob upload | Vercel → Storage → Blob |
 | `UPSTASH_REDIS_REST_URL` / `_TOKEN` | Rate limiting | Vercel Marketplace → Upstash |
-| `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` | Error tracking | Sentry → Project → Client Keys |
+| `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` | Error tracking (bez neho sú všetky Sentry captures no-op) | Sentry → Project → Client Keys |
+| `SENTRY_AUTH_TOKEN` | Build-time upload source-máp (čitateľné prod stacktrace; bez neho sa ticho preskočí) | Sentry → Settings → Auth Tokens |
+| `SENTRY_ORG` / `SENTRY_PROJECT` | Org + project slug pre upload source-máp (project default `cpcprofit`) | Sentry → URL / Project Settings |
 | `CRON_SECRET` | Bearer pre `/api/cron/*` | sami vygenerujete (`openssl rand -hex 32`) |
 | `ADMIN_EMAILS` | Allowlist pre admin endpointy | comma-separated zoznam |
 

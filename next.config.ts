@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next';
+import { withSentryConfig } from '@sentry/nextjs';
 import createNextIntlPlugin from 'next-intl/plugin';
 
 const withNextIntl = createNextIntlPlugin('./i18n/request.ts');
@@ -55,4 +56,17 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
 };
 
-export default withNextIntl(nextConfig);
+// Sentry must wrap the outermost config (after the next-intl plugin). This
+// enables source-map upload (readable prod stack traces — only runs when
+// SENTRY_AUTH_TOKEN is present at build time, otherwise silently skipped) and
+// the /monitoring tunnel route that routes client events through our own
+// origin so ad-blockers don't drop them. org/project come from env so the
+// slug isn't hardcoded across environments.
+export default withSentryConfig(withNextIntl(nextConfig), {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT ?? 'cpcprofit',
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  widenClientFileUpload: true,
+  tunnelRoute: '/monitoring',
+  silent: !process.env.CI,
+});

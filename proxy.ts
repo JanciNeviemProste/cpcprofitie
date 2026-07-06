@@ -75,5 +75,9 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)'],
+  // `monitoring` is Sentry's tunnelRoute (next.config.ts) — it must bypass the
+  // auth/i18n proxy so client error events post through unauthenticated.
+  matcher: [
+    '/((?!monitoring|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+  ],
 };
