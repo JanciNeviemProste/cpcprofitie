@@ -76,7 +76,7 @@ export default async function DataQualityAdminPage() {
                   <td className="px-4 py-3 font-medium">{r.source}</td>
                   <Td>{r.total.toLocaleString('sk-SK')}</Td>
                   <Td>{r.active.toLocaleString('sk-SK')}</Td>
-                  <Td className={tone(r.nullPricePct, 5, 20)}>{r.nullPricePct}%</Td>
+                  <Td className={tone(r.nullPricePct, 30, 60)}>{r.nullPricePct}%</Td>
                   <Td className={tone(r.nullYearPct, 10, 30)}>{r.nullYearPct}%</Td>
                   <Td className={tone(r.nullMileagePct, 10, 30)}>{r.nullMileagePct}%</Td>
                   <Td className={tone(r.nullFuelPct, 20, 50)}>{r.nullFuelPct}%</Td>

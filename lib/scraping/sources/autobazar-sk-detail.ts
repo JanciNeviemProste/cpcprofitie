@@ -3,6 +3,7 @@
 // listing URL directly.
 
 import * as cheerio from 'cheerio';
+import { PRICE_MAX, PRICE_MIN } from '@/lib/analytics/quality';
 import {
   extractEurFromText,
   extractFuelHintFromText,
@@ -104,10 +105,16 @@ export function parseDetailPage(html: string, listing: NormalizedListing): Norma
   // kraj. Backfilling a junk region into null-region rows would be worse
   // than leaving them null for the next listing-page rescrape.
 
-  // Price: the sale price is the first plausible € on the page; leasing/monthly
-  // figures ("2 576 €") and "0 €" placeholders appear after it. Backfills the
-  // list-page value for old rows scraped before the listing parser was fixed.
-  const priceEur = extractEurFromText(fullText);
+  // Price: anchor to the actual price element (`.p-amount` / `.n-action_price`)
+  // — NEVER the first € in body text. The null-price backlog is dominated by
+  // "Cena dohodou" (price-on-request) listings whose price box is empty; on
+  // those, a body-text scan would grab the financing widget's akontácia
+  // ("2 576 €") or a related-car price and write it as the sale price. No
+  // price element → leave null (the row is genuinely price-on-request). Bound
+  // to the plausibility range so a mis-parse can't write junk.
+  const priceRaw = extractEurFromText($('.p-amount, .n-action_price').first().text());
+  const priceEur =
+    priceRaw != null && priceRaw >= PRICE_MIN && priceRaw <= PRICE_MAX ? priceRaw : null;
 
   const listingOverrides: NormalizedDetail['listingOverrides'] = {};
   if (priceEur != null) listingOverrides.priceEur = priceEur;

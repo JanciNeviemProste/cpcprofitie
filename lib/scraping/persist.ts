@@ -378,6 +378,33 @@ export async function persistDetails(
       skipped++;
       continue;
     }
+
+    // Gone (404/410/403/redirect): mark the listing removed so it exits the
+    // active enrichment / null-price pools, and DON'T overwrite an existing
+    // enriched detail row with the empty tombstone fields (onConflictDoNothing
+    // preserves a previously-scraped seller/VIN/equipment). A fresh gone row
+    // still gets a tombstone detail so unenriched-mode notExists stops picking.
+    if (d.gone) {
+      try {
+        await db.execute(sql`
+          UPDATE listings SET removed_at = coalesce(removed_at, now()) WHERE id = ${listingId}
+        `);
+        await db
+          .insert(listingDetails)
+          .values({ listingId, description: '[GONE]', equipment: [] })
+          .onConflictDoNothing({ target: listingDetails.listingId });
+        detailsUpserted++;
+      } catch (e) {
+        console.error('persistDetails_gone_failed', {
+          source: d.source,
+          sourceId: d.sourceId,
+          error: e instanceof Error ? e.message : e,
+        });
+        skipped++;
+      }
+      continue;
+    }
+
     try {
       await db
         .insert(listingDetails)

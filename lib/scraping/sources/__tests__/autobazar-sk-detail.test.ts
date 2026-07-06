@@ -45,6 +45,26 @@ describe('autobazar.sk parseDetailPage', () => {
     expect(d.listingOverrides?.region).toBeUndefined();
   });
 
+  it('emits NO price for a price-on-request page even when body has other € figures', () => {
+    // "Cena dohodou" page: empty price box, but a financing widget and a
+    // related-listing carousel carry € amounts. A body-first-€ scan would
+    // grab the akontácia (2 576 €) — the price element anchor must not.
+    const dohodou =
+      '<html><body>' +
+      '<div class="p-amount"></div>' +
+      '<div class="finance">Výška akontácie <span>2 576</span> €</div>' +
+      '<div class="similar"><a>Iné Audi</a> 18 900 €</div>' +
+      '</body></html>';
+    const d = parseDetailPage(dohodou, LISTING);
+    expect(d.listingOverrides?.priceEur).toBeUndefined();
+  });
+
+  it('rejects an out-of-bounds price in the price element', () => {
+    const junk = '<html><body><h2 class="p-amount">1 500 000 €</h2></body></html>';
+    const d = parseDetailPage(junk, LISTING);
+    expect(d.listingOverrides?.priceEur).toBeUndefined();
+  });
+
   it('captures seller type and photos', () => {
     const d = parseDetailPage(FIXTURE, LISTING);
     expect(d.sellerType).toBe('dealer');

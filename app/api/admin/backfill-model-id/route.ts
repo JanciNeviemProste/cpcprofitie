@@ -27,10 +27,13 @@ export async function GET(request: Request) {
   const dryRun = url.searchParams.get('dryRun') === '1';
   const limitParam = Number(url.searchParams.get('limit'));
   const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : undefined;
+  // Pass ?afterId=<nextCursor> from the previous response to continue the walk.
+  const afterIdParam = url.searchParams.get('afterId');
+  const afterId = afterIdParam && /^\d+$/.test(afterIdParam) ? BigInt(afterIdParam) : undefined;
 
   const startedAt = Date.now();
   try {
-    const stats = await backfillModelId({ dryRun, limit });
+    const stats = await backfillModelId({ dryRun, limit, afterId });
     return NextResponse.json({ stats, elapsedMs: Date.now() - startedAt });
   } catch (e) {
     Sentry.captureException(e, { tags: { component: 'backfill-model-id-api' } });

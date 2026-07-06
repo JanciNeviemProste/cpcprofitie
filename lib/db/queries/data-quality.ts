@@ -11,7 +11,7 @@ import { getDb } from '../index';
 // Single source of truth for plausibility bounds — the same values the
 // cohort/percentile queries filter on, so the "outlier" counts here match
 // exactly what gets excluded downstream.
-import { MILEAGE_MAX, PRICE_MAX, PRICE_MIN } from '@/lib/analytics/quality';
+import { MILEAGE_MAX, PRICE_MAX, PRICE_MIN, YEAR_MIN } from '@/lib/analytics/quality';
 
 export type SourceHealth = 'ok' | 'warn' | 'drift';
 
@@ -106,32 +106,40 @@ function pct(part: number, whole: number): number {
 
 export async function getDataQualityReport(): Promise<DataQualityReport> {
   const generatedAt = new Date().toISOString();
+  const nextYear = new Date().getFullYear() + 1;
   try {
     const db = getDb();
 
+    // Null rates are computed over ACTIVE listings only. Sold/removed rows are
+    // never re-scraped, so their historical nulls would otherwise (a) drown out
+    // a fresh selector drift in the total and (b) keep a just-fixed source
+    // pinned at "drift" forever. The `_active` FILTER on every null count is
+    // what makes the drift alert actually track live extraction health.
+    const ACTIVE = sql`canonical_listing_id IS NULL AND sold_at IS NULL AND removed_at IS NULL`;
     const completenessRows = (await db.execute(sql`
       SELECT
         source,
         COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE ${ACTIVE})::int AS active,
+        COUNT(*) FILTER (WHERE ${ACTIVE} AND price_eur IS NULL)::int AS null_price,
+        COUNT(*) FILTER (WHERE ${ACTIVE} AND year IS NULL)::int AS null_year,
+        COUNT(*) FILTER (WHERE ${ACTIVE} AND mileage_km IS NULL)::int AS null_mileage,
+        COUNT(*) FILTER (WHERE ${ACTIVE} AND fuel IS NULL)::int AS null_fuel,
+        COUNT(*) FILTER (WHERE ${ACTIVE} AND transmission IS NULL)::int AS null_transmission,
+        COUNT(*) FILTER (WHERE ${ACTIVE} AND region IS NULL)::int AS null_region,
+        COUNT(*) FILTER (WHERE ${ACTIVE} AND model_id IS NULL)::int AS null_model,
         COUNT(*) FILTER (
-          WHERE canonical_listing_id IS NULL AND sold_at IS NULL AND removed_at IS NULL
-        )::int AS active,
-        COUNT(*) FILTER (WHERE price_eur IS NULL)::int AS null_price,
-        COUNT(*) FILTER (WHERE year IS NULL)::int AS null_year,
-        COUNT(*) FILTER (WHERE mileage_km IS NULL)::int AS null_mileage,
-        COUNT(*) FILTER (WHERE fuel IS NULL)::int AS null_fuel,
-        COUNT(*) FILTER (WHERE transmission IS NULL)::int AS null_transmission,
-        COUNT(*) FILTER (WHERE region IS NULL)::int AS null_region,
-        COUNT(*) FILTER (WHERE model_id IS NULL)::int AS null_model,
-        COUNT(*) FILTER (
-          WHERE price_eur IS NOT NULL AND (price_eur < ${PRICE_MIN} OR price_eur > ${PRICE_MAX})
+          WHERE ${ACTIVE} AND price_eur IS NOT NULL AND (price_eur < ${PRICE_MIN} OR price_eur > ${PRICE_MAX})
         )::int AS outlier_price,
-        COUNT(*) FILTER (WHERE mileage_km IS NOT NULL AND mileage_km > ${MILEAGE_MAX})::int AS outlier_mileage,
         COUNT(*) FILTER (
-          WHERE canonical_listing_id IS NULL AND sold_at IS NULL AND removed_at IS NULL
-            AND model_id IS NOT NULL AND year IS NOT NULL AND mileage_km IS NOT NULL
+          WHERE ${ACTIVE} AND mileage_km IS NOT NULL AND mileage_km > ${MILEAGE_MAX}
+        )::int AS outlier_mileage,
+        COUNT(*) FILTER (
+          WHERE ${ACTIVE}
+            AND model_id IS NOT NULL
             AND price_eur IS NOT NULL AND price_eur >= ${PRICE_MIN} AND price_eur <= ${PRICE_MAX}
-            AND mileage_km <= ${MILEAGE_MAX}
+            AND year IS NOT NULL AND year >= ${YEAR_MIN} AND year <= ${nextYear}
+            AND mileage_km IS NOT NULL AND mileage_km >= 0 AND mileage_km <= ${MILEAGE_MAX}
         )::int AS cohort_ready
       FROM listings
       GROUP BY source
@@ -153,19 +161,19 @@ export async function getDataQualityReport(): Promise<DataQualityReport> {
     }>;
 
     const completeness: SourceCompleteness[] = completenessRows.map((r) => {
-      const nullPricePct = pct(r.null_price, r.total);
-      const nullRegionPct = pct(r.null_region, r.total);
-      const nullModelPct = pct(r.null_model, r.total);
+      const nullPricePct = pct(r.null_price, r.active);
+      const nullRegionPct = pct(r.null_region, r.active);
+      const nullModelPct = pct(r.null_model, r.active);
       const { health, healthReason } = assessHealth({ nullPricePct, nullModelPct, nullRegionPct });
       return {
         source: r.source,
         total: r.total,
         active: r.active,
         nullPricePct,
-        nullYearPct: pct(r.null_year, r.total),
-        nullMileagePct: pct(r.null_mileage, r.total),
-        nullFuelPct: pct(r.null_fuel, r.total),
-        nullTransmissionPct: pct(r.null_transmission, r.total),
+        nullYearPct: pct(r.null_year, r.active),
+        nullMileagePct: pct(r.null_mileage, r.active),
+        nullFuelPct: pct(r.null_fuel, r.active),
+        nullTransmissionPct: pct(r.null_transmission, r.active),
         nullRegionPct,
         nullModelPct,
         outlierPrice: r.outlier_price,

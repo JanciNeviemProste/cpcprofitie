@@ -38,6 +38,7 @@ export async function POST(request: Request) {
     partition?: number;
     modulo?: number;
     mode?: string;
+    afterId?: string;
   } = {};
   try {
     payload = await request.json();
@@ -48,6 +49,13 @@ export async function POST(request: Request) {
   // 'null-price' re-fetches detail pages for active listings still missing a
   // price (backfill); default 'unenriched' keeps the normal first-pass flow.
   const mode: EnrichSelectMode = payload.mode === 'null-price' ? 'null-price' : 'unenriched';
+  // Cursor carried across invocations so the driver walks the whole null-price
+  // set once. Without it, rows that yield no price (Cena dohodou) sit at the
+  // head and every invocation re-fetches them → livelock, done never true.
+  let cursor: bigint | undefined = undefined;
+  if (mode === 'null-price' && typeof payload.afterId === 'string' && /^\d+$/.test(payload.afterId)) {
+    cursor = BigInt(payload.afterId);
+  }
   // Optional id-based partitioning so N shells can run in parallel on
   // disjoint id subsets.
   const partition =
@@ -76,9 +84,6 @@ export async function POST(request: Request) {
   let totalErrors = 0;
   let batches = 0;
   let done = false;
-  // null-price mode advances a cursor so rows that can't yield a price don't
-  // get re-selected forever within one invocation.
-  let cursor: bigint | undefined;
   const sampleErrors: string[] = [];
 
   while (Date.now() < deadline) {
@@ -133,6 +138,9 @@ export async function POST(request: Request) {
     totalDetails,
     totalErrors,
     sampleErrors,
+    // The driver must send this back as `afterId` next invocation so the walk
+    // continues past rows already visited (null-price mode only).
+    nextCursor: mode === 'null-price' && cursor != null ? cursor.toString() : undefined,
     elapsedMs: Date.now() - startedAt,
   });
 }

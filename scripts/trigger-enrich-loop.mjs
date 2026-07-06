@@ -22,11 +22,21 @@ let mode;
 for (const arg of process.argv.slice(3)) {
   const p = /^--partition=(\d+)$/.exec(arg);
   const m = /^--modulo=(\d+)$/.exec(arg);
-  const md = /^--mode=(null-price|unenriched)$/.exec(arg);
+  const md = /^--mode=(.+)$/.exec(arg);
   if (p) partition = Number(p[1]);
   if (m) modulo = Number(m[1]);
-  if (md) mode = md[1];
+  if (md) {
+    // Reject typos loudly instead of silently falling through to a full
+    // unenriched pass the operator didn't ask for.
+    if (md[1] !== 'null-price' && md[1] !== 'unenriched') {
+      console.error(`invalid --mode='${md[1]}' (expected null-price|unenriched)`);
+      process.exit(2);
+    }
+    mode = md[1];
+  }
 }
+// Cursor threaded across invocations for null-price mode (server returns it).
+let afterId;
 const partitionTag = partition != null && modulo != null ? `[${partition}/${modulo}]` : '';
 
 const env = readFileSync('.env.local', 'utf8');
@@ -61,6 +71,7 @@ async function callOnce() {
         source,
         ...(partition != null && modulo != null ? { partition, modulo } : {}),
         ...(mode ? { mode } : {}),
+        ...(afterId != null ? { afterId } : {}),
       }),
       signal: ac.signal,
     });
@@ -78,6 +89,8 @@ async function callOnce() {
       return { done: false, fatal: parsed.error === 'unauthorized' };
     }
     runningTotal += parsed.totalDetails ?? 0;
+    // Advance the null-price cursor so the next invocation continues the walk.
+    if (parsed.nextCursor != null) afterId = String(parsed.nextCursor);
     consecutiveErrors = 0;
     const totalSecs = ((Date.now() - startedAt) / 1000).toFixed(0);
     console.log(

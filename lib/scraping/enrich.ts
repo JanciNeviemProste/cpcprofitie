@@ -95,21 +95,22 @@ export async function runEnrichment(
         headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' },
       });
       fetched++;
-      // bazos.sk redirects deleted listings /inzerat/<id>/ → /inzeraty/<slug>/
-      // (search page) with HTTP 200 instead of 404. Detect by checking the
-      // final URL after redirects.
+      // Deleted listings often 200-redirect to a search/home page (e.g.
+      // bazos.sk /inzerat/<id>/ → /inzeraty/<slug>/, autobazar.sk → a listing
+      // grid). Parsing that landing page would scrape ANOTHER car's price into
+      // this listing. Detect generically: a redirect whose final URL no longer
+      // contains this listing's sourceId is gone. (Canonicalizing redirects —
+      // trailing slash, www — keep the id, so they're not flagged.)
+      const finalUrl = res.url || url;
       const goneViaRedirect =
-        res.ok &&
-        source.id === 'bazos.sk' &&
-        url.includes('/inzerat/') &&
-        res.url &&
-        !res.url.includes('/inzerat/');
+        res.ok && Boolean(res.url) && res.url !== url && !finalUrl.includes(listing.sourceId);
       if (!res.ok || goneViaRedirect) {
-        const status = goneViaRedirect ? 'redirect→list' : `HTTP ${res.status}`;
+        const status = goneViaRedirect ? 'redirect→gone' : `HTTP ${res.status}`;
         errors.push(`${listing.sourceId}: ${status}`);
-        // Insert a tombstone for permanently-gone listings so loadUnenrichedBatch
-        // doesn't re-pick them every run. 404/410 = removed/sold by the source.
-        // 403 = source blocks us (e.g. Cloudflare), also permanent for our crawler.
+        // Tombstone permanently-gone listings so they exit the enrichment /
+        // null-price pools. 404/410 = removed/sold; 403 = source blocks us.
+        // `gone: true` tells persistDetails to mark removed_at and NOT wipe an
+        // existing enriched detail row with these empty fields.
         if (
           goneViaRedirect ||
           res.status === 404 ||
@@ -119,6 +120,7 @@ export async function runEnrichment(
           details.push({
             source: source.id,
             sourceId: listing.sourceId,
+            gone: true,
             photos: [],
             description: '[GONE]',
             vin: null,

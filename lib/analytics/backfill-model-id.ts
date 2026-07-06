@@ -21,15 +21,26 @@ export type BackfillModelIdStats = {
   updated: number;
   remaining: number;
   dryRun: boolean;
+  /** Highest id scanned this call. Pass back as `afterId` to continue — rows
+   *  whose title can't resolve to a model stay NULL and would otherwise be
+   *  re-scanned from the top forever (remaining never reaches 0). */
+  nextCursor: string | null;
 };
 
 export async function backfillModelId(
-  opts: { limit?: number; dryRun?: boolean } = {},
+  opts: { limit?: number; dryRun?: boolean; afterId?: bigint } = {},
 ): Promise<BackfillModelIdStats> {
   const limit = Math.min(10_000, Math.max(1, opts.limit ?? 5000));
   const dryRun = opts.dryRun ?? false;
   const db = getDb();
-  const stats: BackfillModelIdStats = { scanned: 0, resolved: 0, updated: 0, remaining: 0, dryRun };
+  const stats: BackfillModelIdStats = {
+    scanned: 0,
+    resolved: 0,
+    updated: 0,
+    remaining: 0,
+    dryRun,
+    nextCursor: null,
+  };
 
   try {
     const rows = (await db.execute(sql`
@@ -40,11 +51,16 @@ export async function backfillModelId(
         AND canonical_listing_id IS NULL
         AND sold_at IS NULL
         AND removed_at IS NULL
+        ${opts.afterId != null ? sql`AND id > ${opts.afterId.toString()}::bigint` : sql``}
       ORDER BY id
       LIMIT ${limit}
     `)) as unknown as Array<{ id: string | number | bigint; raw_title: string }>;
 
     stats.scanned = rows.length;
+    if (rows.length > 0) {
+      const last = rows[rows.length - 1]!.id;
+      stats.nextCursor = typeof last === 'bigint' ? last.toString() : String(last);
+    }
 
     // Group listing ids by the resolved model_id so we issue one UPDATE per
     // distinct model instead of one per row.

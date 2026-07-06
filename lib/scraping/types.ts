@@ -61,6 +61,11 @@ export type SellerType = 'private' | 'dealer';
 export type NormalizedDetail = {
   source: Source;
   sourceId: string;
+  /** The detail fetch resolved to a "gone" state (404/410/403 or a redirect
+   *  that dropped the listing id). persistDetails marks the listing removed
+   *  and must NOT overwrite an existing enriched detail row with the empty
+   *  tombstone fields. */
+  gone?: boolean;
   /** Full-resolution photo URLs in display order. May be empty. */
   photos: string[];
   description: string | null;
