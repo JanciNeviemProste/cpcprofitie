@@ -12,6 +12,7 @@ import { getDb } from '@/lib/db';
 import { marketSnapshots } from '@/lib/db/schema';
 import { computeSnapshot, type SnapshotInput } from '@/lib/scraping/aggregate';
 import { isoWeekStart } from './dates';
+import { plausiblePricedRaw } from './quality';
 
 export type WeeklySnapshotStats = {
   cohortsComputed: number;
@@ -65,9 +66,9 @@ export async function computeWeeklySnapshots(opts: {
         ELSE '150k+'
       END AS mileage_bucket,
       ARRAY_AGG(l.price_eur::float8) FILTER (
-        WHERE l.price_eur IS NOT NULL
-          AND l.sold_at IS NULL
+        WHERE l.sold_at IS NULL
           AND l.removed_at IS NULL
+          AND ${plausiblePricedRaw('l')}
       ) AS active_prices,
       COUNT(*) FILTER (WHERE l.sold_at IS NOT NULL AND l.sold_at >= ${sql.raw(weekStartLit)}) AS sold_this_week,
       ARRAY_AGG(
@@ -80,9 +81,9 @@ export async function computeWeeklySnapshots(opts: {
       AND l.canonical_listing_id IS NULL
     GROUP BY 1, 2, 3, 4
     HAVING COUNT(*) FILTER (
-      WHERE l.price_eur IS NOT NULL
-        AND l.sold_at IS NULL
+      WHERE l.sold_at IS NULL
         AND l.removed_at IS NULL
+        AND ${plausiblePricedRaw('l')}
     ) >= ${minCohortSize}
   `)) as unknown as Array<{
     model_id: number;

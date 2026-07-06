@@ -5,6 +5,7 @@
 import * as Sentry from '@sentry/nextjs';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
+import { plausibleListing } from '@/lib/analytics/quality';
 import {
   garage,
   listings,
@@ -51,6 +52,12 @@ async function getTrendingModelsUnsafe(limit: number): Promise<TrendingItem[]> {
         sql`${listings.canonicalListingId} IS NULL`,
         sql`${listings.removedAt} IS NULL`,
         sql`${listings.soldAt} IS NULL`,
+        // Keep implausible prices/mileage out of the median.
+        plausibleListing({
+          priceEur: listings.priceEur,
+          mileageKm: listings.mileageKm,
+          year: listings.year,
+        }),
       ),
     )
     .groupBy(listings.modelId, vehicleModels.slug, vehicleModels.name, vehicleMakes.name)
@@ -159,6 +166,11 @@ async function getModelKpiUnsafe(slug: string): Promise<ModelKpi | null> {
         sql`${listings.canonicalListingId} IS NULL`,
         sql`${listings.removedAt} IS NULL`,
         sql`${listings.soldAt} IS NULL`,
+        plausibleListing({
+          priceEur: listings.priceEur,
+          mileageKm: listings.mileageKm,
+          year: listings.year,
+        }),
       ),
     )
     .groupBy(vehicleModels.slug, vehicleModels.name, vehicleMakes.name)

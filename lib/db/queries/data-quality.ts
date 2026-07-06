@@ -8,12 +8,10 @@
 import * as Sentry from '@sentry/nextjs';
 import { sql } from 'drizzle-orm';
 import { getDb } from '../index';
-
-// Plausibility bounds — values outside these are treated as junk and excluded
-// from cohorts/percentiles (see PLAUSIBLE_LISTING in lib/analytics/quality.ts).
-export const PRICE_MIN = 100;
-export const PRICE_MAX = 500_000;
-export const MILEAGE_MAX = 1_000_000;
+// Single source of truth for plausibility bounds — the same values the
+// cohort/percentile queries filter on, so the "outlier" counts here match
+// exactly what gets excluded downstream.
+import { MILEAGE_MAX, PRICE_MAX, PRICE_MIN } from '@/lib/analytics/quality';
 
 export type SourceCompleteness = {
   source: string;

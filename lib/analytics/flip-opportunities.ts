@@ -17,6 +17,7 @@ import { getDb } from '@/lib/db';
 import { toBigInt } from '@/lib/db/bigint';
 import { flipOpportunities } from '@/lib/db/schema';
 import { buildExplainer, computeDealScore, estimateProfit } from './deal-score';
+import { plausiblePricedRaw } from './quality';
 
 export type FlipComputeStats = {
   candidatesScanned: number;
@@ -78,12 +79,10 @@ export async function computeFlipOpportunities(): Promise<FlipComputeStats> {
       WHERE l.canonical_listing_id IS NULL
         AND l.sold_at IS NULL
         AND l.removed_at IS NULL
-        AND l.price_eur IS NOT NULL
-        AND l.price_eur > 0
         AND l.model_id IS NOT NULL
         AND l.year IS NOT NULL
         AND l.mileage_km IS NOT NULL
-        AND l.mileage_km >= 0
+        AND ${plausiblePricedRaw('l')}
     ),
     cohort_pool AS (
       SELECT
@@ -97,12 +96,10 @@ export async function computeFlipOpportunities(): Promise<FlipComputeStats> {
       WHERE l.canonical_listing_id IS NULL
         AND l.sold_at IS NULL
         AND l.removed_at IS NULL
-        AND l.price_eur IS NOT NULL
-        AND l.price_eur > 0
         AND l.model_id IS NOT NULL
         AND l.year IS NOT NULL
         AND l.mileage_km IS NOT NULL
-        AND l.mileage_km >= 0
+        AND ${plausiblePricedRaw('l')}
     ),
     cohort_agg AS (
       SELECT
