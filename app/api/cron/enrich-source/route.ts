@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
 import { getSource } from '@/lib/scraping';
-import { loadUnenrichedBatch } from '@/lib/scraping/enrich-batch-loader';
+import {
+  loadUnenrichedBatch,
+  type EnrichSelectMode,
+} from '@/lib/scraping/enrich-batch-loader';
 import { persistDetails, runEnrichment } from '@/lib/scraping';
 import { ALL_SOURCES, type Source } from '@/lib/scraping';
 
@@ -30,13 +33,21 @@ export async function POST(request: Request) {
     }
   }
 
-  let payload: { source?: string; partition?: number; modulo?: number } = {};
+  let payload: {
+    source?: string;
+    partition?: number;
+    modulo?: number;
+    mode?: string;
+  } = {};
   try {
     payload = await request.json();
   } catch {
     return NextResponse.json({ error: 'bad_json' }, { status: 400 });
   }
   const sourceId = payload.source;
+  // 'null-price' re-fetches detail pages for active listings still missing a
+  // price (backfill); default 'unenriched' keeps the normal first-pass flow.
+  const mode: EnrichSelectMode = payload.mode === 'null-price' ? 'null-price' : 'unenriched';
   // Optional id-based partitioning so N shells can run in parallel on
   // disjoint id subsets.
   const partition =
@@ -65,12 +76,15 @@ export async function POST(request: Request) {
   let totalErrors = 0;
   let batches = 0;
   let done = false;
+  // null-price mode advances a cursor so rows that can't yield a price don't
+  // get re-selected forever within one invocation.
+  let cursor: bigint | undefined;
   const sampleErrors: string[] = [];
 
   while (Date.now() < deadline) {
     let batch;
     try {
-      batch = await loadUnenrichedBatch(sourceId as Source, BATCH_SIZE, partition);
+      batch = await loadUnenrichedBatch(sourceId as Source, BATCH_SIZE, partition, mode, cursor);
     } catch (e) {
       Sentry.captureException(e, {
         tags: { component: 'enrich-source', step: 'loadBatch', source: sourceId },
@@ -85,6 +99,11 @@ export async function POST(request: Request) {
       break;
     }
     batches++;
+    // Advance the null-price cursor past this batch (rawPayload.__cursorId).
+    if (mode === 'null-price') {
+      const lastId = batch[batch.length - 1]?.rawPayload?.__cursorId;
+      if (typeof lastId === 'string') cursor = BigInt(lastId);
+    }
     try {
       const result = await runEnrichment(source, batch, {
         limit: BATCH_SIZE,

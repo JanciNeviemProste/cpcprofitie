@@ -4,13 +4,13 @@
 
 import * as cheerio from 'cheerio';
 import {
+  extractEurFromText,
   extractFuelHintFromText,
   extractKmFromText,
   extractTransmissionHintFromText,
   extractYearFromText,
   parseFuel,
   parseTransmission,
-  prefixRegion,
 } from '../normalize';
 import type { NormalizedDetail, NormalizedListing, SellerType } from '../types';
 
@@ -98,16 +98,24 @@ export function parseDetailPage(html: string, listing: NormalizedListing): Norma
   const fuel = parseFuel(extractFuelHintFromText(fuelHint ?? ''));
   const transHint = extractAfterLabel(fullText, 'Prevodovka');
   const transmission = parseTransmission(extractTransmissionHintFromText(transHint ?? ''));
-  const locRaw = extractAfterLabel(fullText, 'Lokalita') ?? extractAfterLabel(fullText, 'Mesto');
-  const region = prefixRegion(locRaw, 'SK');
+  // Region is deliberately NOT taken from the detail page: the "Mesto"/
+  // "Lokalita" label extraction is unreliable here (it produced junk like
+  // "SK-4 l"), and the fixed listing-page parser already yields a clean
+  // kraj. Backfilling a junk region into null-region rows would be worse
+  // than leaving them null for the next listing-page rescrape.
+
+  // Price: the sale price is the first plausible € on the page; leasing/monthly
+  // figures ("2 576 €") and "0 €" placeholders appear after it. Backfills the
+  // list-page value for old rows scraped before the listing parser was fixed.
+  const priceEur = extractEurFromText(fullText);
 
   const listingOverrides: NormalizedDetail['listingOverrides'] = {};
+  if (priceEur != null) listingOverrides.priceEur = priceEur;
   if (year != null && year >= 1980 && year <= new Date().getFullYear() + 1)
     listingOverrides.year = year;
   if (mileageKm != null && mileageKm > 0) listingOverrides.mileageKm = mileageKm;
   if (fuel != null) listingOverrides.fuel = fuel;
   if (transmission != null) listingOverrides.transmission = transmission;
-  if (region != null) listingOverrides.region = region;
 
   return {
     source: listing.source,
