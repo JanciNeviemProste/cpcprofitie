@@ -15,17 +15,18 @@ import { listingDetails, listings } from '../db/schema';
 import type { NormalizedListing, Source } from './types';
 
 export type PartitionOpts = { index: number; modulo: number };
-export type EnrichSelectMode = 'unenriched' | 'null-price';
+export type EnrichSelectMode = 'unenriched' | 'null-price' | 'null-model';
 
 export async function loadUnenrichedBatch(
   source: Source,
   size: number,
   partition?: PartitionOpts,
   mode: EnrichSelectMode = 'unenriched',
-  // Cursor for 'null-price' mode: rows whose detail yields no price stay
-  // null-price and would be re-selected forever without this. The caller
-  // advances it past each batch (read from rawPayload.__cursorId). Ignored in
-  // 'unenriched' mode, which self-advances as rows gain a listing_details row.
+  // Cursor for the 'null-price' / 'null-model' backfill modes: rows whose
+  // detail yields no price/model stay NULL and would be re-selected forever
+  // without this. The caller advances it past each batch (read from
+  // rawPayload.__cursorId). Ignored in 'unenriched' mode, which self-advances
+  // as rows gain a listing_details row.
   afterId?: bigint,
 ): Promise<NormalizedListing[]> {
   const db = getDb();
@@ -37,9 +38,12 @@ export async function loadUnenrichedBatch(
       ? sql`(${listings.id} % ${partition.modulo}) = ${partition.index}`
       : undefined;
   const selectFilter =
-    mode === 'null-price'
+    mode === 'null-price' || mode === 'null-model'
       ? and(
-          isNull(listings.priceEur),
+          // The target-column IS NULL among active listings, walked by an id
+          // cursor so rows that stay NULL even after enrichment (e.g. gone)
+          // don't get re-selected forever.
+          mode === 'null-price' ? isNull(listings.priceEur) : isNull(listings.modelId),
           isNull(listings.canonicalListingId),
           isNull(listings.soldAt),
           isNull(listings.removedAt),

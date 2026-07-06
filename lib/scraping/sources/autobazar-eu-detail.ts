@@ -2,7 +2,7 @@
 // `record.findById` tRPC query result into `__NEXT_DATA__`, so we don't have
 // to scrape rendered DOM at all — we just JSON-parse the script tag.
 
-import { parseFuel, parseTransmission, prefixRegion } from '../normalize';
+import { parseFuel, parseTransmission, prefixRegion, slugify } from '../normalize';
 import type { NormalizedDetail, NormalizedListing, SellerType } from '../types';
 
 const NEXT_DATA_RE = /<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/;
@@ -19,6 +19,9 @@ type RawImage = {
 
 type RawRecord = {
   id?: string;
+  title?: string | null;
+  brandValue?: string | null;
+  carModelValue?: string | null;
   vin?: string | null;
   description?: string | null;
   otherEquipment?: string | null;
@@ -184,10 +187,20 @@ export function parseDetailPage(
   if (transmission != null) listingOverrides.transmission = transmission;
   if (region != null) listingOverrides.region = region;
 
+  // Identity for backfilling title-less/model-less stubs. Use the SAME slug
+  // logic as the list parser (autobazar-eu.ts) so a detail-backfilled model_id
+  // lands on the exact vehicle_models row a normal list scrape would use.
+  const makeSlug = record.brandValue ? slugify(record.brandValue) : null;
+  const modelSlug = record.carModelValue ? slugify(record.carModelValue) : null;
+  const rawTitle = record.title?.trim() || null;
+  const identity =
+    makeSlug || modelSlug || rawTitle ? { makeSlug, modelSlug, rawTitle } : undefined;
+
   return {
     source: 'autobazar.eu',
     sourceId: listing.sourceId,
     photos,
+    identity,
     bodyType: record.bodyworkValue?.trim() || null,
     colorExterior: record.colorValue?.trim() || null,
     colorInterior: null,

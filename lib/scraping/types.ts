@@ -66,6 +66,15 @@ export type NormalizedDetail = {
    *  and must NOT overwrite an existing enriched detail row with the empty
    *  tombstone fields. */
   gone?: boolean;
+  /** Make/model/title recovered from the detail page. Used to backfill
+   *  listings that were inserted as title-less/model-less stubs (autobazar.eu
+   *  sitemap sweep). persistDetails resolves model_id via ensureModelId and
+   *  fills listings.model_id / raw_title only when currently NULL. */
+  identity?: {
+    makeSlug: string | null;
+    modelSlug: string | null;
+    rawTitle: string | null;
+  };
   /** Full-resolution photo URLs in display order. May be empty. */
   photos: string[];
   description: string | null;

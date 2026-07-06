@@ -2,9 +2,10 @@
 // from .env.local (never logs it). Run with:
 //   node scripts/trigger-enrich-loop.mjs <source>
 //   node scripts/trigger-enrich-loop.mjs autobazar.sk --mode=null-price
-//     ^ price backfill: re-fetch detail pages for active listings still
-//       missing a price. Loops until the whole set is walked once; re-run to
-//       retry any rows whose detail yielded no price.
+//   node scripts/trigger-enrich-loop.mjs autobazar.eu --mode=null-model
+//     ^ backfill: re-fetch detail pages for active listings still missing a
+//       price / model. Loops until the whole set is walked once; re-run to
+//       retry any rows whose detail yielded nothing.
 
 import { readFileSync } from 'node:fs';
 
@@ -28,8 +29,8 @@ for (const arg of process.argv.slice(3)) {
   if (md) {
     // Reject typos loudly instead of silently falling through to a full
     // unenriched pass the operator didn't ask for.
-    if (md[1] !== 'null-price' && md[1] !== 'unenriched') {
-      console.error(`invalid --mode='${md[1]}' (expected null-price|unenriched)`);
+    if (!['null-price', 'null-model', 'unenriched'].includes(md[1])) {
+      console.error(`invalid --mode='${md[1]}' (expected null-price|null-model|unenriched)`);
       process.exit(2);
     }
     mode = md[1];

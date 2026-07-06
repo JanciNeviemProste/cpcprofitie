@@ -46,14 +46,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'bad_json' }, { status: 400 });
   }
   const sourceId = payload.source;
-  // 'null-price' re-fetches detail pages for active listings still missing a
-  // price (backfill); default 'unenriched' keeps the normal first-pass flow.
-  const mode: EnrichSelectMode = payload.mode === 'null-price' ? 'null-price' : 'unenriched';
-  // Cursor carried across invocations so the driver walks the whole null-price
-  // set once. Without it, rows that yield no price (Cena dohodou) sit at the
-  // head and every invocation re-fetches them → livelock, done never true.
+  // 'null-price' / 'null-model' re-fetch detail pages for active listings
+  // still missing a price / model (backfill); default 'unenriched' keeps the
+  // normal first-pass flow.
+  const mode: EnrichSelectMode =
+    payload.mode === 'null-price'
+      ? 'null-price'
+      : payload.mode === 'null-model'
+        ? 'null-model'
+        : 'unenriched';
+  const isBackfill = mode === 'null-price' || mode === 'null-model';
+  // Cursor carried across invocations so the driver walks the whole backfill
+  // set once. Without it, rows that stay NULL after enrichment (Cena dohodou,
+  // gone) sit at the head and every invocation re-fetches them → livelock.
   let cursor: bigint | undefined = undefined;
-  if (mode === 'null-price' && typeof payload.afterId === 'string' && /^\d+$/.test(payload.afterId)) {
+  if (isBackfill && typeof payload.afterId === 'string' && /^\d+$/.test(payload.afterId)) {
     cursor = BigInt(payload.afterId);
   }
   // Optional id-based partitioning so N shells can run in parallel on
@@ -104,8 +111,8 @@ export async function POST(request: Request) {
       break;
     }
     batches++;
-    // Advance the null-price cursor past this batch (rawPayload.__cursorId).
-    if (mode === 'null-price') {
+    // Advance the backfill cursor past this batch (rawPayload.__cursorId).
+    if (isBackfill) {
       const lastId = batch[batch.length - 1]?.rawPayload?.__cursorId;
       if (typeof lastId === 'string') cursor = BigInt(lastId);
     }
@@ -139,8 +146,8 @@ export async function POST(request: Request) {
     totalErrors,
     sampleErrors,
     // The driver must send this back as `afterId` next invocation so the walk
-    // continues past rows already visited (null-price mode only).
-    nextCursor: mode === 'null-price' && cursor != null ? cursor.toString() : undefined,
+    // continues past rows already visited (backfill modes only).
+    nextCursor: isBackfill && cursor != null ? cursor.toString() : undefined,
     elapsedMs: Date.now() - startedAt,
   });
 }

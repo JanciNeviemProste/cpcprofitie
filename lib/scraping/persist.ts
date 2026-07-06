@@ -460,9 +460,9 @@ export async function persistDetails(
       // list card. Patch any NULL columns on listings — never overwrite a
       // non-null value because the list card might be the more trustworthy
       // source for that field (e.g. price is on every list card).
+      const set: Record<string, unknown> = {};
       if (d.listingOverrides) {
         const o = d.listingOverrides;
-        const set: Record<string, unknown> = {};
         if (o.year != null) set.year = sql`coalesce(${listings.year}, ${o.year})`;
         if (o.mileageKm != null)
           set.mileageKm = sql`coalesce(${listings.mileageKm}, ${o.mileageKm})`;
@@ -472,9 +472,25 @@ export async function persistDetails(
         if (o.region != null) set.region = sql`coalesce(${listings.region}, ${o.region})`;
         if (o.priceEur != null)
           set.priceEur = sql`coalesce(${listings.priceEur}, ${String(o.priceEur)})`;
-        if (Object.keys(set).length > 0) {
-          await db.update(listings).set(set).where(eq(listings.id, listingId));
+      }
+      // Identity backfill for title-less/model-less stubs: resolve model_id the
+      // same way list scraping does and patch model_id / raw_title only when
+      // NULL. Same coalesce-fill-only guarantee as the field overrides.
+      if (d.identity) {
+        if (d.identity.rawTitle) {
+          set.rawTitle = sql`coalesce(${listings.rawTitle}, ${d.identity.rawTitle})`;
         }
+        const modelId = await ensureModelId(
+          d.identity.makeSlug,
+          d.identity.modelSlug,
+          d.identity.rawTitle,
+        );
+        if (modelId != null) {
+          set.modelId = sql`coalesce(${listings.modelId}, ${modelId})`;
+        }
+      }
+      if (Object.keys(set).length > 0) {
+        await db.update(listings).set(set).where(eq(listings.id, listingId));
       }
     } catch (e) {
       console.error('persistDetails_row_failed', {

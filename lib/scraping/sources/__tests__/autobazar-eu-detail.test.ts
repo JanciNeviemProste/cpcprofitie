@@ -49,10 +49,20 @@ describe('autobazar.eu parseDetailPage', () => {
     expect(d.powerKw).toBeGreaterThan(0);
   });
 
+  it('recovers make/model/title identity for stub backfill', () => {
+    // Same slug logic as the list parser, so a detail-backfilled model_id
+    // lands on the exact vehicle_models row a list scrape would use.
+    const d = parseDetailPage(FIXTURE, STUB_LISTING);
+    expect(d.identity?.makeSlug).toBe('skoda');
+    expect(d.identity?.modelSlug).toBe('superb-combi');
+    expect(d.identity?.rawTitle).toMatch(/Superb Combi/i);
+  });
+
   it('returns safe defaults when __NEXT_DATA__ is missing', () => {
     const d = parseDetailPage('<html><body></body></html>', STUB_LISTING);
     expect(d.photos).toEqual([]);
     expect(d.vin).toBeNull();
     expect(d.sellerName).toBeNull();
+    expect(d.identity).toBeUndefined();
   });
 });
