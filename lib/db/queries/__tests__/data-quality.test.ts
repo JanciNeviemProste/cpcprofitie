@@ -3,6 +3,7 @@ import {
   assessHealthForTest,
   computeRepostPct,
   pickDriftAlerts,
+  toPublicDataHealth,
   type DataQualityReport,
 } from '../data-quality';
 
@@ -37,6 +38,7 @@ function report(
   completeness: Array<{ source: string; health: 'ok' | 'warn' | 'drift'; healthReason: string | null }>,
 ): DataQualityReport {
   return {
+    ok: true,
     generatedAt: '2026-07-06T00:00:00.000Z',
     // Only the fields pickDriftAlerts reads matter; cast the rest.
     completeness: completeness.map((c) => ({ ...c }) as never),
@@ -72,6 +74,69 @@ describe('pickDriftAlerts', () => {
     expect(
       pickDriftAlerts(report([{ source: 'x', health: 'ok', healthReason: null }])),
     ).toEqual([]);
+  });
+});
+
+describe('toPublicDataHealth', () => {
+  function full(
+    ok: boolean,
+    rows: Array<{ source: string; active: number; health: 'ok' | 'warn' | 'drift' }>,
+    repostPct = 0,
+  ): DataQualityReport {
+    return {
+      ok,
+      generatedAt: '2026-07-07T00:00:00.000Z',
+      completeness: rows.map(
+        (r) =>
+          ({
+            source: r.source,
+            active: r.active,
+            health: r.health,
+            healthReason: null,
+            nullPricePct: 0,
+            nullModelPct: 0,
+            cohortReadyPct: 0,
+          }) as never,
+      ),
+      enrichment: [],
+      dealScore: { activeCanonical: 0, flipRows: 0, withDealScore: 0, avgCohortSize: null },
+      dedup: {
+        total: 0,
+        canonical: 0,
+        repostClones: 0,
+        repostPct,
+        vinCoveragePct: 0,
+        maxClusterSize: 0,
+        crossSourceVinClusters: 0,
+      },
+    };
+  }
+
+  it('overall is the worst source health', () => {
+    const p = toPublicDataHealth(
+      full(true, [
+        { source: 'a', active: 100, health: 'ok' },
+        { source: 'b', active: 200, health: 'drift' },
+        { source: 'c', active: 50, health: 'warn' },
+      ]),
+    );
+    expect(p.overall).toBe('drift');
+    expect(p.totalActive).toBe(350);
+    expect(p.sources).toHaveLength(3);
+  });
+
+  it('is unknown (never ok) when the report failed', () => {
+    const p = toPublicDataHealth(full(false, []));
+    expect(p.overall).toBe('unknown');
+    expect(p.ok).toBe(false);
+  });
+
+  it('is unknown when there is no data, even if ok', () => {
+    expect(toPublicDataHealth(full(true, [])).overall).toBe('unknown');
+  });
+
+  it('passes through the repost percentage', () => {
+    expect(toPublicDataHealth(full(true, [{ source: 'a', active: 1, health: 'ok' }], 17.5)).repostPct).toBe(17.5);
   });
 });
 

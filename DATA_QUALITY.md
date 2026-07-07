@@ -11,7 +11,35 @@ nameraný stav, čo je hotové, a plán ako kvalitu dlhodobo udržať.
   health, a **health flag** (🟢/🟡/🔴 Drift?) pre okamžitú detekciu.
 - **Endpoint:** `GET /api/admin/data-quality` (admin session alebo
   `Authorization: Bearer $CRON_SECRET`) → JSON, vhodné na skriptovanie.
-- Zdroj: `lib/db/queries/data-quality.ts` (read-only agregácie).
+- **Verejný prehľad (bez hesla):** `/status` — kurátorovaný podmnožinou reportu
+  (per-zdroj health + pokrytie ceny/modelu/kohort-ready + repost %). Ťažká
+  agregácia je cachovaná (`unstable_cache`, 10 min), takže verejná návštevnosť
+  nemôže dolovať DB. Interné mechaniky dedupu a raw totals sú zámerne vynechané.
+- Zdroj: `lib/db/queries/data-quality.ts` (read-only agregácie). Report nesie
+  `ok: boolean` — pri zlyhaní (DB nedostupná) je `false`, aby slepé čítanie nikdy
+  nevyzeralo ako „🟢 OK". Drift cron aj `/status` musia `!ok` brať ako „neznáme".
+
+## Deduplikácia repostov (2026-07-06)
+
+Predajcovia zmažú inzerát a znovu pridajú, aby vyskočil na vrch → bez dedup
+každý repost vyzerá ako nové auto a skresľuje metriky. Rieši `lib/dedup`:
+VIN pass (cross-source, all-time) + fingerprint pass (90d okno) →
+`canonical_listing_id` na najstarší; reposty vylúčené zo VŠETKÝCH metrík.
+
+**Poistka proti false-merge (pridaná):** fingerprint bez fotky/modelu sa scvrkne
+na degenerát (`unknown|…|no-photo`) a zlúči RÔZNE autá. Fingerprint pass teraz
+klastruje len riadky s `model_id` **a** fotkou (per-auto rozlišovač). VIN pass
+ostáva. Meranie odhalilo starý 11 550-klonový monster; jednorazový
+`POST /api/admin/recluster?reset=1` (reset + guarded re-cluster) ho vyčistil:
+repostPct **32,8 % → 17,5 %**, maxClusterSize **11 550 → 717**.
+
+**Metriky v reporte (`dedup`):** repostClones/Pct, vinCoveragePct,
+maxClusterSize (kanárik nad-zlučovania), crossSourceVinClusters.
+
+**Zostávajúce (v2):** maxClusterSize 717 = buď genuinný veľa-repost, alebo
+predajca so zdieľanou prvou fotkou → perceptuálny hash fotiek by to rozlíšil.
+Cross-source BEZ VIN zámerne neriešime (rôzne CDN → rôzny basename → rôzny
+odtlačok; zlučovať naprieč zdrojmi bez VIN = riziko false-positive).
 
 ## Nameraný baseline (2026-07-06, pred fixom autobazar.sk)
 

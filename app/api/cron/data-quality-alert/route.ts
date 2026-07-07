@@ -26,6 +26,20 @@ export async function GET(request: Request) {
   const startedAt = Date.now();
   try {
     const report = await getDataQualityReport();
+    // A blind watchdog is worse than a loud one: getDataQualityReport swallows
+    // its own DB errors and returns an all-zeros report, which pickDriftAlerts
+    // reads as "no sources, nothing to alert". Catch that here so a DB outage
+    // pages instead of silently reporting driftCount=0.
+    if (!report.ok) {
+      Sentry.captureMessage('Data-quality watchdog blind: report failed to compute', {
+        level: 'error',
+        tags: { component: 'data-quality-alert' },
+      });
+      return NextResponse.json(
+        { error: 'report_failed', elapsedMs: Date.now() - startedAt },
+        { status: 500 },
+      );
+    }
     const alerts = pickDriftAlerts(report);
     const drift = alerts.filter((a) => a.health === 'drift');
 

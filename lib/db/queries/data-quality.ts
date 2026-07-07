@@ -6,6 +6,7 @@
 // implausible data is poisoning cohorts, and per-source where it's worst.
 
 import * as Sentry from '@sentry/nextjs';
+import { unstable_cache } from 'next/cache';
 import { sql } from 'drizzle-orm';
 import { getDb } from '../index';
 // Single source of truth for plausibility bounds — the same values the
@@ -106,6 +107,12 @@ export type DedupHealth = {
 };
 
 export type DataQualityReport = {
+  // False when the report failed to compute (DB unreachable / query error).
+  // Without this, the catch path below returns all-zeros that read as a
+  // healthy-but-empty corpus — a blind watchdog silently reporting "🟢 OK".
+  // Consumers (the drift cron, the public status page) must treat !ok as
+  // "unknown", never as healthy.
+  ok: boolean;
   generatedAt: string;
   completeness: SourceCompleteness[];
   enrichment: EnrichmentCoverage[];
@@ -290,10 +297,11 @@ export async function getDataQualityReport(): Promise<DataQualityReport> {
       crossSourceVinClusters: dr?.cross_source_vin ?? 0,
     };
 
-    return { generatedAt, completeness, enrichment, dealScore, dedup };
+    return { ok: true, generatedAt, completeness, enrichment, dealScore, dedup };
   } catch (e) {
     Sentry.captureException(e, { tags: { component: 'data-quality', step: 'getDataQualityReport' } });
     return {
+      ok: false,
       generatedAt,
       completeness: [],
       enrichment: [],
@@ -307,6 +315,89 @@ export async function getDataQualityReport(): Promise<DataQualityReport> {
         maxClusterSize: 0,
         crossSourceVinClusters: 0,
       },
+    };
+  }
+}
+
+// ── Public status surface ────────────────────────────────────────────────
+// A curated, no-auth subset of the report for a public /status page. Trimmed
+// to health + the coverage a visitor can reason about (price/model/cohort),
+// deliberately omitting internal dedup mechanics and raw business totals.
+
+export type PublicSourceHealth = {
+  source: string;
+  active: number;
+  health: SourceHealth;
+  nullPricePct: number;
+  nullModelPct: number;
+  cohortReadyPct: number;
+};
+
+export type PublicDataHealth = {
+  ok: boolean;
+  generatedAt: string;
+  // Worst source health, or 'unknown' when the report failed / has no data —
+  // never silently 'ok' on a blind read.
+  overall: SourceHealth | 'unknown';
+  totalActive: number;
+  repostPct: number;
+  sources: PublicSourceHealth[];
+};
+
+const HEALTH_RANK: Record<SourceHealth, number> = { ok: 0, warn: 1, drift: 2 };
+
+/** Pure projection — testable without a DB. */
+export function toPublicDataHealth(r: DataQualityReport): PublicDataHealth {
+  const overall: SourceHealth | 'unknown' =
+    !r.ok || r.completeness.length === 0
+      ? 'unknown'
+      : r.completeness.reduce<SourceHealth>(
+          (worst, c) => (HEALTH_RANK[c.health] > HEALTH_RANK[worst] ? c.health : worst),
+          'ok',
+        );
+  return {
+    ok: r.ok,
+    generatedAt: r.generatedAt,
+    overall,
+    totalActive: r.completeness.reduce((sum, c) => sum + c.active, 0),
+    repostPct: r.dedup.repostPct,
+    sources: r.completeness.map((c) => ({
+      source: c.source,
+      active: c.active,
+      health: c.health,
+      nullPricePct: c.nullPricePct,
+      nullModelPct: c.nullModelPct,
+      cohortReadyPct: c.cohortReadyPct,
+    })),
+  };
+}
+
+// Cache the heavy aggregation so the public page can't be used to hammer the
+// DB: at most one full report per 10 min, shared across all visitors. The
+// wrapper re-throws on a failed report so unstable_cache never caches the
+// blind state (a transient DB blip retries on the next request, not 10 min
+// later).
+const loadPublicHealth = unstable_cache(
+  async (): Promise<PublicDataHealth> => {
+    const report = await getDataQualityReport();
+    if (!report.ok) throw new Error('data_quality_report_failed');
+    return toPublicDataHealth(report);
+  },
+  ['public-data-health'],
+  { revalidate: 600, tags: ['data-health'] },
+);
+
+export async function getPublicDataHealth(): Promise<PublicDataHealth> {
+  try {
+    return await loadPublicHealth();
+  } catch {
+    return {
+      ok: false,
+      generatedAt: new Date().toISOString(),
+      overall: 'unknown',
+      totalActive: 0,
+      repostPct: 0,
+      sources: [],
     };
   }
 }
