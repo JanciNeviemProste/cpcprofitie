@@ -21,6 +21,7 @@ import {
   extractFuelHintFromText,
   extractTransmissionHintFromText,
   parseFuel,
+  parseMakeModel,
   parseTransmission,
   prefixRegion,
 } from '../normalize';
@@ -99,6 +100,17 @@ export function parseDetailPage(html: string, listing: NormalizedListing): Norma
   if (transmission != null) listingOverrides.transmission = transmission;
   if (region != null) listingOverrides.region = region;
 
+  // Identity backfill for title-less/model-less legacy stubs. The detail page
+  // carries the full title in <h1> (verified live: "Ford Kuga 1.5 Ecoboost
+  // 2020 …"); .nadpisdetail is a fallback. Parse it with the SAME parseMakeModel
+  // the list scraper uses, so a backfilled model_id lands on the exact
+  // vehicle_models row a list scrape would have produced.
+  const rawTitle =
+    $('h1').first().text().trim() || $('.nadpisdetail').first().text().trim() || null;
+  const { makeSlug, modelSlug } = parseMakeModel(rawTitle);
+  const identity =
+    makeSlug || modelSlug || rawTitle ? { makeSlug, modelSlug, rawTitle } : undefined;
+
   return {
     source: listing.source,
     sourceId: listing.sourceId,
@@ -113,6 +125,7 @@ export function parseDetailPage(html: string, listing: NormalizedListing): Norma
     sellerType,
     sellerName,
     equipment,
+    identity,
     listingOverrides: Object.keys(listingOverrides).length > 0 ? listingOverrides : undefined,
   };
 }
