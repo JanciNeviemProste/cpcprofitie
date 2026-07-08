@@ -17,7 +17,9 @@
 // <a href="...img/.../<id>.jpg">.
 
 import * as cheerio from 'cheerio';
+import { PRICE_MAX, PRICE_MIN } from '@/lib/analytics/quality';
 import {
+  extractEurFromText,
   extractFuelHintFromText,
   extractTransmissionHintFromText,
   parseFuel,
@@ -93,7 +95,19 @@ export function parseDetailPage(html: string, listing: NormalizedListing): Norma
   const locRaw = extractAfterLabel(fullText, 'Lokalita');
   const region = prefixRegion(locRaw, 'SK');
 
+  // Price: anchor to the listing's own `.inzeratycena` element — NEVER a bare
+  // "N €" span from the page. Bazoš detail pages render a sidebar of related
+  // listings whose prices are also bare € spans; grabbing the first one would
+  // write a neighbour's price as this car's. `.inzeratycena` is the same class
+  // the list parser anchors on, so backfilled prices match a list scrape.
+  // This drains the ~8k legacy price-null stubs (scraped before the list price
+  // parser existed) the same way identity drains the model-null ones.
+  const priceRaw = extractEurFromText($('.inzeratycena').first().text());
+  const priceEur =
+    priceRaw != null && priceRaw >= PRICE_MIN && priceRaw <= PRICE_MAX ? priceRaw : null;
+
   const listingOverrides: NormalizedDetail['listingOverrides'] = {};
+  if (priceEur != null) listingOverrides.priceEur = priceEur;
   if (year != null) listingOverrides.year = year;
   if (mileageKm != null && mileageKm > 0) listingOverrides.mileageKm = mileageKm;
   if (fuel != null) listingOverrides.fuel = fuel;

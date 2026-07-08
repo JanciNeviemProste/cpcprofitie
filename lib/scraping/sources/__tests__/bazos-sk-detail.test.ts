@@ -51,6 +51,20 @@ describe('bazos.sk parseDetailPage', () => {
     expect(d.listingOverrides?.region).toMatch(/Tren/i);
   });
 
+  it('recovers price from .inzeratycena, not a related-listing € span', () => {
+    // Drains the ~8k legacy price-null stubs. The fixture has a sidebar listing
+    // priced 33 000 € after the car's own 15 490 € — anchoring on .inzeratycena
+    // .first() must pick THIS car's price, never the neighbour's.
+    const d = parseDetailPage(FIXTURE, STUB_LISTING);
+    expect(d.listingOverrides?.priceEur).toBe(15490);
+  });
+
+  it('leaves price unset when there is no price element', () => {
+    const noPrice = '<html><body><h1>Ford Kuga</h1></body></html>';
+    const d = parseDetailPage(noPrice, STUB_LISTING);
+    expect(d.listingOverrides?.priceEur).toBeUndefined();
+  });
+
   it('returns no identity when the title is missing', () => {
     const d = parseDetailPage('<html><body></body></html>', STUB_LISTING);
     expect(d.identity).toBeUndefined();
