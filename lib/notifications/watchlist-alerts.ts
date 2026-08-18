@@ -4,6 +4,7 @@
 // Driven by /api/cron/watchlist-alerts (daily).
 
 import * as Sentry from '@sentry/nextjs';
+import { DbUnavailableError, dbCall, isConnectionError, noteDbUnavailable } from '@/lib/db/errors';
 import { render } from '@react-email/components';
 import { and, asc, eq, gte, lte, sql } from 'drizzle-orm';
 import {
@@ -179,6 +180,7 @@ export async function runWatchlistAlerts(
       bucket.watchlistIds.push(w.id);
       byUser.set(w.userId, bucket);
     } catch (e) {
+      if (isConnectionError(e)) throw noteDbUnavailable(e, { step: 'watchlist-alerts.match' });
       stats.errors++;
       Sentry.captureException(e, {
         tags: { component: 'watchlist-alerts', step: 'match' },
@@ -248,22 +250,33 @@ export async function runWatchlistAlerts(
       // Bump lastNotifiedAt to the window END captured before matching (not
       // now()) and log the event. Mock mode (non-prod only, see guard above)
       // also bumps so local runs don't re-report forever.
-      await db
-        .update(watchlist)
-        .set({ lastNotifiedAt: windowEnd })
-        .where(
-          sql`${watchlist.id} IN (${sql.join(
-            bucket.watchlistIds.map((id) => sql`${id}::uuid`),
-            sql`, `,
-          )})`,
-        );
-      await db.insert(events).values({
-        userId,
-        type: 'watchlist_alert_sent',
-        payload: { watchlistIds: bucket.watchlistIds, listingCount: total, mode: result.mode },
-      });
+      await dbCall(
+        () =>
+          db
+            .update(watchlist)
+            .set({ lastNotifiedAt: windowEnd })
+            .where(
+              sql`${watchlist.id} IN (${sql.join(
+                bucket.watchlistIds.map((id) => sql`${id}::uuid`),
+                sql`, `,
+              )})`,
+            ),
+        { step: 'watchlist-alerts.send' },
+      );
+      await dbCall(
+        () =>
+          db.insert(events).values({
+            userId,
+            type: 'watchlist_alert_sent',
+            payload: { watchlistIds: bucket.watchlistIds, listingCount: total, mode: result.mode },
+          }),
+        { step: 'watchlist-alerts.send' },
+      );
       if (result.mode === 'live') stats.usersEmailed++;
     } catch (e) {
+      // Only a classified DB outage aborts — a Resend timeout is a per-user
+      // failure and must stay in stats.errors.
+      if (e instanceof DbUnavailableError) throw e;
       stats.errors++;
       Sentry.captureException(e, {
         tags: { component: 'watchlist-alerts', step: 'send' },

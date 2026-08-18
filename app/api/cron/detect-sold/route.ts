@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
 import { detectSoldListings } from '@/lib/analytics/sold-detector';
+import { DbUnavailableError } from '@/lib/db/errors';
 
 // Nightly sweep: walk listings with removed_at set and decide sold vs relisted.
 // Caps at maxBatches * batchSize listings/run so we always fit in Vercel's
@@ -30,6 +31,10 @@ export async function GET(request: Request) {
     }
     return NextResponse.json({ stats, elapsedMs });
   } catch (e) {
+    if (e instanceof DbUnavailableError) {
+      // noteDbUnavailable() already sent the single report for this run.
+      return NextResponse.json({ error: 'db_unavailable' }, { status: 503 });
+    }
     Sentry.captureException(e, { tags: { component: 'detect-sold-cron' } });
     return NextResponse.json(
       {

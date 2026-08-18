@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
 import { sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
+import { DbUnavailableError, dbCall } from '@/lib/db/errors';
 import { toBigInt } from '@/lib/db/bigint';
 import { USER_AGENT } from '@/lib/scraping';
 
@@ -35,6 +36,22 @@ export async function GET(request: Request) {
     }
   }
 
+  try {
+    return await run(request);
+  } catch (e) {
+    // One report per run already went out from noteDbUnavailable().
+    if (e instanceof DbUnavailableError) {
+      return NextResponse.json({ error: 'db_unavailable' }, { status: 503 });
+    }
+    Sentry.captureException(e, { tags: { component: 'check-removed', step: 'run' } });
+    return NextResponse.json(
+      { error: 'check_removed_failed', message: e instanceof Error ? e.message : String(e) },
+      { status: 500 },
+    );
+  }
+}
+
+async function run(request: Request): Promise<NextResponse> {
   const db = getDb();
   const url = new URL(request.url);
   const dayOfWeek = new Date().getUTCDay(); // 0=Sun..6=Sat — partitions 1/7 per day
@@ -44,7 +61,9 @@ export async function GET(request: Request) {
   // Pull this day's slice of active listings via deterministic partitioning.
   // (id::int % 7) maps a listing to one of 7 buckets so each gets checked
   // once a week regardless of scrape timing.
-  const candidates = (await db.execute(sql`
+  const candidates = (await dbCall(
+    () =>
+      db.execute(sql`
     SELECT id, url, source
     FROM listings
     WHERE source = ANY(${sql`${SOURCES_TO_CHECK as unknown as string[]}::text[]`})
@@ -53,7 +72,9 @@ export async function GET(request: Request) {
       AND (id::bigint % 7) = ${dayOfWeek}
     ORDER BY last_seen_at ASC
     LIMIT ${maxBatch}
-  `)) as unknown as Array<{ id: string | number | bigint; url: string; source: string }>;
+  `),
+    { step: 'check-removed.loadCandidates' },
+  )) as unknown as Array<{ id: string | number | bigint; url: string; source: string }>;
 
   const stats = {
     dayOfWeek,
@@ -79,17 +100,29 @@ export async function GET(request: Request) {
       });
       stats.checked++;
       if (res.status === 404 || res.status === 410) {
-        await db.execute(sql`
-          UPDATE listings SET removed_at = now() WHERE id = ${toBigInt(row.id)}
-        `);
+        await dbCall(
+          () =>
+            db.execute(sql`
+              UPDATE listings SET removed_at = now() WHERE id = ${toBigInt(row.id)}
+            `),
+          { step: 'check-removed.markRemoved' },
+        );
         stats.markedRemoved++;
       } else if (res.status >= 200 && res.status < 400) {
-        await db.execute(sql`
-          UPDATE listings SET last_seen_at = now() WHERE id = ${toBigInt(row.id)}
-        `);
+        await dbCall(
+          () =>
+            db.execute(sql`
+              UPDATE listings SET last_seen_at = now() WHERE id = ${toBigInt(row.id)}
+            `),
+          { step: 'check-removed.markLive' },
+        );
         stats.stillLive++;
       }
     } catch (e) {
+      // A dead database aborts the run; a listing site that times out does
+      // not. Both surface the same socket codes, so only the classified
+      // DbUnavailableError from dbCall() is treated as fatal here.
+      if (e instanceof DbUnavailableError) throw e;
       stats.errors++;
       Sentry.captureException(e, {
         tags: { component: 'check-removed', source: row.source },

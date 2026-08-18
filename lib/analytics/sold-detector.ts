@@ -10,6 +10,7 @@
 // sold_at NULL so the listing stays out of "days-to-sell" analytics.
 
 import * as Sentry from '@sentry/nextjs';
+import { isConnectionError, noteDbUnavailable } from '@/lib/db/errors';
 import { sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { listings } from '@/lib/db/schema';
@@ -63,6 +64,7 @@ export async function detectSoldListings(
       `);
       rows = result as unknown as CandidateRow[];
     } catch (e) {
+      if (isConnectionError(e)) throw noteDbUnavailable(e, { step: 'sold-detector.loadBatch' });
       stats.errors++;
       Sentry.captureException(e, {
         tags: { component: 'sold-detector', step: 'loadBatch' },
@@ -109,6 +111,9 @@ export async function detectSoldListings(
       stats.markedSold += markedCount;
       stats.keptRelisted += rows.length - markedCount;
     } catch (e) {
+      // Continuing here would retry the next batch against the same dead
+      // server and report a fresh error for each one.
+      if (isConnectionError(e)) throw noteDbUnavailable(e, { step: 'sold-detector.processBatch' });
       stats.errors++;
       Sentry.captureException(e, {
         tags: { component: 'sold-detector', step: 'processBatch' },

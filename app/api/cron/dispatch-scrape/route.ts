@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
+import { DbUnavailableError } from '@/lib/db/errors';
 import {
   ALL_SOURCES,
   getSource,
@@ -104,6 +105,11 @@ export async function GET(request: Request) {
         errors: result.errors,
       });
     } catch (e) {
+      // A dead database makes the remaining sources pointless; a scrape
+      // failure on one site does not.
+      if (e instanceof DbUnavailableError) {
+        return NextResponse.json({ error: 'db_unavailable', summary }, { status: 503 });
+      }
       console.error('cron_scrape_source_failed', {
         source: id,
         error: e instanceof Error ? e.message : e,

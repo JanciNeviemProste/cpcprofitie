@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
+import { DbUnavailableError, isConnectionError, noteDbUnavailable } from '@/lib/db/errors';
 import { getSource } from '@/lib/scraping';
 import {
   loadUnenrichedBatch,
@@ -98,6 +99,10 @@ export async function POST(request: Request) {
     try {
       batch = await loadUnenrichedBatch(sourceId as Source, BATCH_SIZE, partition, mode, cursor);
     } catch (e) {
+      if (isConnectionError(e)) {
+        noteDbUnavailable(e, { step: 'enrich-source.loadBatch', source: sourceId });
+        return NextResponse.json({ error: 'db_unavailable' }, { status: 503 });
+      }
       Sentry.captureException(e, {
         tags: { component: 'enrich-source', step: 'loadBatch', source: sourceId },
       });
@@ -129,6 +134,11 @@ export async function POST(request: Request) {
         if (sampleErrors.length < 5) sampleErrors.push(e);
       }
     } catch (e) {
+      // Enrichment does HTTP as well as DB work, so only the classified DB
+      // outage stops the loop — a slow detail page must not.
+      if (e instanceof DbUnavailableError) {
+        return NextResponse.json({ error: 'db_unavailable', batches }, { status: 503 });
+      }
       totalErrors++;
       Sentry.captureException(e, {
         tags: { component: 'enrich-source', step: 'runEnrichment', source: sourceId },

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
+import { isConnectionError, noteDbUnavailable } from '@/lib/db/errors';
 import { backfillFingerprints, clusterReposts } from '@/lib/dedup/cluster';
 import { computeFlipOpportunities } from '@/lib/analytics/flip-opportunities';
 import { computeWeeklySnapshots } from '@/lib/analytics/snapshots';
@@ -43,6 +44,10 @@ export async function GET(request: Request) {
     const updated = await backfillFingerprints({ limit: fingerprintLimit });
     summary.backfillFingerprints = { updated };
   } catch (e) {
+    if (isConnectionError(e)) {
+      noteDbUnavailable(e, { step: 'weekly-maintenance.backfillFingerprints' });
+      return NextResponse.json({ error: 'db_unavailable', summary, errors }, { status: 503 });
+    }
     const msg = e instanceof Error ? e.message : String(e);
     errors.push(`backfillFingerprints: ${msg}`);
     Sentry.captureException(e, {
@@ -54,6 +59,10 @@ export async function GET(request: Request) {
     const stats = await clusterReposts({ windowDays: 90 });
     summary.clusterReposts = stats;
   } catch (e) {
+    if (isConnectionError(e)) {
+      noteDbUnavailable(e, { step: 'weekly-maintenance.clusterReposts' });
+      return NextResponse.json({ error: 'db_unavailable', summary, errors }, { status: 503 });
+    }
     const msg = e instanceof Error ? e.message : String(e);
     errors.push(`clusterReposts: ${msg}`);
     Sentry.captureException(e, {
@@ -65,6 +74,10 @@ export async function GET(request: Request) {
     const stats = await computeWeeklySnapshots();
     summary.computeWeeklySnapshots = stats;
   } catch (e) {
+    if (isConnectionError(e)) {
+      noteDbUnavailable(e, { step: 'weekly-maintenance.computeWeeklySnapshots' });
+      return NextResponse.json({ error: 'db_unavailable', summary, errors }, { status: 503 });
+    }
     const msg = e instanceof Error ? e.message : String(e);
     errors.push(`computeWeeklySnapshots: ${msg}`);
     Sentry.captureException(e, {
@@ -76,6 +89,10 @@ export async function GET(request: Request) {
     const stats = await computeFlipOpportunities();
     summary.computeFlipOpportunities = stats;
   } catch (e) {
+    if (isConnectionError(e)) {
+      noteDbUnavailable(e, { step: 'weekly-maintenance.computeFlipOpportunities' });
+      return NextResponse.json({ error: 'db_unavailable', summary, errors }, { status: 503 });
+    }
     const msg = e instanceof Error ? e.message : String(e);
     errors.push(`computeFlipOpportunities: ${msg}`);
     Sentry.captureException(e, {

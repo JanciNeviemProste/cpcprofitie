@@ -6,6 +6,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import * as Sentry from '@sentry/nextjs';
 import { getDb } from '@/lib/db';
+import { isConnectionError, isDbKnownUnavailable, noteDbUnavailable } from '@/lib/db/errors';
 import { hasDatabaseUrl } from '@/lib/db/url';
 import {
   listingDetails,
@@ -37,11 +38,20 @@ function hasDb(): boolean {
 // just means the first listing per slug per cold start pays the round trip.
 const makeIdCache = new Map<string, number>();
 const modelIdCache = new Map<string, number>();
+// Slugs we already failed to resolve. Without this a query-level failure is
+// retried (2-3 round trips) for every subsequent listing sharing the slug.
+const unresolvableModelSlugs = new Set<string>();
+
+/** How many model lookups may be in flight at once. Kept under the postgres.js
+ *  default pool size (max: 10) so a large batch queues in our code rather than
+ *  saturating the pool. */
+const MODEL_RESOLVE_CONCURRENCY = 8;
 
 /** Test seam — clears the in-process lookup caches between tests. */
 export function __resetModelCache(): void {
   makeIdCache.clear();
   modelIdCache.clear();
+  unresolvableModelSlugs.clear();
 }
 
 async function ensureMakeId(makeSlug: string): Promise<number | null> {
@@ -74,6 +84,7 @@ async function ensureMakeId(makeSlug: string): Promise<number | null> {
     makeIdCache.set(makeSlug, finalId);
     return finalId;
   } catch (e) {
+    if (isConnectionError(e)) throw noteDbUnavailable(e, { step: 'ensureMakeId', makeSlug });
     console.error('ensureMakeId_failed', {
       makeSlug,
       error: e instanceof Error ? e.message : e,
@@ -94,6 +105,7 @@ export async function ensureModelId(
   if (!modelSlug) return null;
   const cached = modelIdCache.get(modelSlug);
   if (cached) return cached;
+  if (unresolvableModelSlugs.has(modelSlug)) return null;
   if (!makeSlug) return null;
   try {
     const db = getDb();
@@ -107,7 +119,10 @@ export async function ensureModelId(
       return found[0]!.id;
     }
     const makeId = await ensureMakeId(makeSlug);
-    if (!makeId) return null;
+    if (!makeId) {
+      unresolvableModelSlugs.add(modelSlug);
+      return null;
+    }
     const id = 1_000_000 + (hash32(modelSlug) & 0x7fffff);
     await db
       .insert(vehicleModels)
@@ -127,6 +142,11 @@ export async function ensureModelId(
     modelIdCache.set(modelSlug, finalId);
     return finalId;
   } catch (e) {
+    // An unreachable server is not a per-model problem: report it once and let
+    // it abort the run instead of repeating for every remaining listing.
+    if (isConnectionError(e)) {
+      throw noteDbUnavailable(e, { step: 'ensureModelId', makeSlug, modelSlug });
+    }
     console.error('ensureModelId_failed', {
       modelSlug,
       error: e instanceof Error ? e.message : e,
@@ -135,8 +155,49 @@ export async function ensureModelId(
       tags: { component: 'persist', step: 'ensureModelId' },
       extra: { makeSlug, modelSlug },
     });
+    unresolvableModelSlugs.add(modelSlug);
     return null;
   }
+}
+
+/**
+ * Resolve every distinct model slug in a batch to its ID.
+ *
+ * Previously this was `Promise.all(rows.map(...))`, which fired one lookup per
+ * listing with no concurrency cap — hundreds of simultaneous queries against a
+ * 10-connection pool, and hundreds of duplicate lookups for the same slug. It
+ * also meant an outage produced one error per listing (CPCPROFIT-8).
+ *
+ * Deduplicating first cuts the query count by roughly an order of magnitude,
+ * and the bounded workers let an outage stop the batch after the first failure
+ * instead of after the last.
+ */
+async function resolveModelIds(rows: NormalizedListing[]): Promise<Map<string, number | null>> {
+  const wanted = new Map<string, { makeSlug: string | null; displayName: string | null }>();
+  for (const r of rows) {
+    if (!r.modelSlug || wanted.has(r.modelSlug)) continue;
+    wanted.set(r.modelSlug, { makeSlug: r.makeSlug, displayName: r.rawTitle });
+  }
+
+  const queue = [...wanted.entries()];
+  const resolved = new Map<string, number | null>();
+  let cursor = 0;
+
+  async function worker(): Promise<void> {
+    while (cursor < queue.length) {
+      // Another worker already hit the outage — everything after this point
+      // would fail identically, so stop rather than pile on.
+      if (isDbKnownUnavailable()) return;
+      const [modelSlug, meta] = queue[cursor++]!;
+      resolved.set(modelSlug, await ensureModelId(meta.makeSlug, modelSlug, meta.displayName));
+    }
+  }
+
+  // A rejecting worker (DbUnavailableError) propagates and aborts the batch.
+  await Promise.all(
+    Array.from({ length: Math.min(MODEL_RESOLVE_CONCURRENCY, queue.length) }, () => worker()),
+  );
+  return resolved;
 }
 
 export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertCounts> {
@@ -150,43 +211,43 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
   let skipped = 0;
   let lastError: string | undefined;
 
-  // Resolve all model IDs up front so the batch insert is one round trip per chunk.
-  const resolved = await Promise.all(
-    rows.map(async (r) => {
-      if (!r.sourceId || !r.url) return null;
-      const modelId = await ensureModelId(r.makeSlug, r.modelSlug, r.rawTitle);
-      // Compute a weak fingerprint at upsert time using only listing-page
-      // fields. After detail enrichment runs, backfillFingerprints() will
-      // recompute with sellerName + first photo URL for stronger matching.
-      const fingerprint = computeFingerprint({
-        makeSlug: r.makeSlug,
-        modelSlug: r.modelSlug,
-        year: r.year,
-        mileageKm: r.mileageKm,
-        region: r.region,
-        sellerName: null,
-        firstPhotoUrl: null,
-      });
-      return {
-        source: r.source,
-        sourceId: r.sourceId,
-        modelId,
-        priceEur: r.priceEur != null ? String(r.priceEur) : null,
-        year: r.year,
-        mileageKm: r.mileageKm,
-        fuel: r.fuel,
-        transmission: r.transmission,
-        region: r.region,
-        rawTitle: r.rawTitle,
-        url: r.url,
-        rawJson: r.rawPayload,
-        fingerprint,
-        viewCount: r.viewCount ?? null,
-        isFeatured: r.isFeatured === true,
-        sellerPhone: r.sellerPhone ?? null,
-      };
-    }),
-  );
+  // Resolve all model IDs up front so the batch insert is one round trip per
+  // chunk. Deduplicated and concurrency-capped — see resolveModelIds above.
+  const modelIds = await resolveModelIds(rows);
+  const resolved = rows.map((r) => {
+    if (!r.sourceId || !r.url) return null;
+    const modelId = (r.modelSlug ? modelIds.get(r.modelSlug) : null) ?? null;
+    // Compute a weak fingerprint at upsert time using only listing-page
+    // fields. After detail enrichment runs, backfillFingerprints() will
+    // recompute with sellerName + first photo URL for stronger matching.
+    const fingerprint = computeFingerprint({
+      makeSlug: r.makeSlug,
+      modelSlug: r.modelSlug,
+      year: r.year,
+      mileageKm: r.mileageKm,
+      region: r.region,
+      sellerName: null,
+      firstPhotoUrl: null,
+    });
+    return {
+      source: r.source,
+      sourceId: r.sourceId,
+      modelId,
+      priceEur: r.priceEur != null ? String(r.priceEur) : null,
+      year: r.year,
+      mileageKm: r.mileageKm,
+      fuel: r.fuel,
+      transmission: r.transmission,
+      region: r.region,
+      rawTitle: r.rawTitle,
+      url: r.url,
+      rawJson: r.rawPayload,
+      fingerprint,
+      viewCount: r.viewCount ?? null,
+      isFeatured: r.isFeatured === true,
+      sellerPhone: r.sellerPhone ?? null,
+    };
+  });
   const resolvedRows = resolved.filter((r): r is NonNullable<typeof r> => r !== null);
   // Deduplicate by (source, sourceId): some sites return the same listings
   // across "different" paginated pages (e.g. autobazar.sk /inzeraty/?page=N
@@ -265,6 +326,8 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
           .onConflictDoNothing({ target: [listingPhotos.listingId, listingPhotos.position] });
       }
     } catch (e) {
+      // Otherwise an outage silently inflates `skipped` and the run "succeeds".
+      if (isConnectionError(e)) throw noteDbUnavailable(e, { step: 'upsertListings' });
       const errMsg = e instanceof Error ? e.message : String(e);
       console.error('listings_batch_upsert_failed', {
         chunkSize: chunk.length,
@@ -300,8 +363,7 @@ export async function recordScrapeRun(
     if (counts.lastError) combinedErrors.push(`upsert: ${counts.lastError}`);
     await db.insert(scrapeRuns).values({
       source,
-      status:
-        result.errors.length === 0 && !counts.lastError ? 'succeeded' : 'failed',
+      status: result.errors.length === 0 && !counts.lastError ? 'succeeded' : 'failed',
       startedAt: result.startedAt,
       finishedAt: result.finishedAt,
       listingsAdded: counts.added,
@@ -309,6 +371,7 @@ export async function recordScrapeRun(
       errorMessage: combinedErrors.length > 0 ? combinedErrors.join('; ') : null,
     });
   } catch (e) {
+    if (isConnectionError(e)) throw noteDbUnavailable(e, { step: 'recordScrapeRun', source });
     console.error('scrape_run_record_failed', e instanceof Error ? e.message : e);
     // Lost audit trail without alerting blinds us to schema-drift-style bugs.
     Sentry.captureException(e, {
@@ -333,10 +396,7 @@ function listingKey(source: Source, sourceId: string): string {
   return `${source}::${sourceId}`;
 }
 
-async function resolveListingId(
-  source: Source,
-  sourceId: string,
-): Promise<bigint | null> {
+async function resolveListingId(source: Source, sourceId: string): Promise<bigint | null> {
   const key = listingKey(source, sourceId);
   const cached = listingIdCache.get(key);
   if (cached !== undefined) return cached;
@@ -351,6 +411,7 @@ async function resolveListingId(
     if (id !== null) listingIdCache.set(key, id);
     return id;
   } catch (e) {
+    if (isConnectionError(e)) throw noteDbUnavailable(e, { step: 'resolveListingId', source });
     console.error('resolveListingId_failed', {
       source,
       sourceId,
@@ -360,9 +421,7 @@ async function resolveListingId(
   }
 }
 
-export async function persistDetails(
-  details: NormalizedDetail[],
-): Promise<DetailUpsertCounts> {
+export async function persistDetails(details: NormalizedDetail[]): Promise<DetailUpsertCounts> {
   if (details.length === 0) return { detailsUpserted: 0, photosInserted: 0, skipped: 0 };
   if (!hasDb()) {
     return { detailsUpserted: 0, photosInserted: 0, skipped: details.length };
@@ -395,6 +454,7 @@ export async function persistDetails(
           .onConflictDoNothing({ target: listingDetails.listingId });
         detailsUpserted++;
       } catch (e) {
+        if (isConnectionError(e)) throw noteDbUnavailable(e, { step: 'persistDetails.gone' });
         console.error('persistDetails_gone_failed', {
           source: d.source,
           sourceId: d.sourceId,
@@ -493,6 +553,7 @@ export async function persistDetails(
         await db.update(listings).set(set).where(eq(listings.id, listingId));
       }
     } catch (e) {
+      if (isConnectionError(e)) throw noteDbUnavailable(e, { step: 'persistDetails.row' });
       console.error('persistDetails_row_failed', {
         source: d.source,
         sourceId: d.sourceId,

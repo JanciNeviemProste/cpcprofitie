@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
 import { sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
+import { DbUnavailableError, dbCall } from '@/lib/db/errors';
 
 // Daily snapshot of current asking prices for active (not sold, not removed)
 // listings. Idempotent on (listing_id, recorded_on) via ON CONFLICT DO NOTHING.
@@ -24,7 +25,9 @@ export async function GET(request: Request) {
   const startedAt = Date.now();
   try {
     const db = getDb();
-    const result = await db.execute(sql`
+    const result = await dbCall(
+      () =>
+        db.execute(sql`
       INSERT INTO listing_price_history (listing_id, recorded_on, price_eur)
       SELECT id, CURRENT_DATE, price_eur
       FROM listings
@@ -32,7 +35,9 @@ export async function GET(request: Request) {
         AND sold_at IS NULL
         AND removed_at IS NULL
       ON CONFLICT DO NOTHING
-    `);
+    `),
+      { step: 'daily-price-snapshot' },
+    );
     const insertedRows =
       (result as { rowCount?: number | null }).rowCount ?? 0;
     return NextResponse.json({
@@ -40,6 +45,10 @@ export async function GET(request: Request) {
       elapsedMs: Date.now() - startedAt,
     });
   } catch (e) {
+    if (e instanceof DbUnavailableError) {
+      // noteDbUnavailable() already sent the single report for this run.
+      return NextResponse.json({ error: 'db_unavailable' }, { status: 503 });
+    }
     Sentry.captureException(e, {
       tags: { component: 'daily-price-snapshot' },
     });
