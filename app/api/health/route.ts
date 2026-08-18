@@ -53,12 +53,18 @@ export async function GET(request: Request) {
       await withTimeout(getDb().execute(sql`select 1`), DEEP_PROBE_TIMEOUT_MS);
       dbProbe = { reachable: true, latencyMs: Date.now() - probeStart };
     } catch (e) {
-      checks.db = false;
       dbProbe = {
         reachable: false,
         latencyMs: Date.now() - probeStart,
-        // Distinguishes "server is gone" from "the query itself broke".
-        error: isConnectionError(e) ? 'connection_failed' : 'query_failed',
+        // A hung connect is the canonical dead-database symptom, so it gets its
+        // own label — reporting it as 'query_failed' would point whoever is
+        // paged at the SQL instead of at the server.
+        error:
+          e instanceof ProbeTimeout
+            ? 'timeout'
+            : isConnectionError(e)
+              ? 'connection_failed'
+              : 'query_failed',
       };
     }
   }
@@ -72,6 +78,8 @@ export async function GET(request: Request) {
 
   // An unreachable database is an outage in every environment, not just
   // production — otherwise a preview deploy pointed at a dead DB reads green.
+  // Kept separate from `checks.db` on purpose: "env var missing" and "server
+  // unreachable" need different fixes, so they must not collapse into one flag.
   const probeFailed = dbProbe?.reachable === false;
   const status: 'ok' | 'degraded' | 'error' =
     missingRequired.length > 0 || probeFailed
@@ -98,13 +106,26 @@ export async function GET(request: Request) {
   );
 }
 
+class ProbeTimeout extends Error {
+  constructor(ms: number) {
+    super(`health probe timed out after ${ms}ms`);
+    this.name = 'ProbeTimeout';
+  }
+}
+
 /** postgres.js honours its own connect_timeout (30s by default) — far too long
- *  for a health endpoint, so race it against our own deadline. */
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`health probe timed out after ${ms}ms`)), ms),
-    ),
-  ]);
+ *  for a health endpoint, so race it against our own deadline. The timer is
+ *  cleared on the success path so a served request doesn't leave one pending. */
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new ProbeTimeout(ms)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }

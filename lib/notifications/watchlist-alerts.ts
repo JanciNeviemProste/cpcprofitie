@@ -84,7 +84,7 @@ export async function runWatchlistAlerts(
   // excluded too: without the model filter they'd degrade into
   // match-everything firehoses. Ordered so a >maxWatchlists table degrades
   // deterministically instead of starving a random subset.
-  const watchRows = (await db
+  const watchRowsQuery = db
     .select({
       id: watchlist.id,
       userId: watchlist.userId,
@@ -106,7 +106,10 @@ export async function runWatchlistAlerts(
     .leftJoin(vehicleMakes, eq(vehicleMakes.id, vehicleModels.makeId))
     .where(and(eq(watchlist.notifyByEmail, true), sql`${watchlist.modelId} IS NOT NULL`))
     .orderBy(asc(watchlist.createdAt))
-    .limit(maxWatchlists)) as WatchRow[];
+    .limit(maxWatchlists);
+  const watchRows = (await dbCall(() => watchRowsQuery, {
+    step: 'watchlist-alerts.loadWatchRows',
+  })) as WatchRow[];
 
   stats.watchlistsScanned = watchRows.length;
   if (watchRows.length === 0) return stats;
@@ -133,8 +136,7 @@ export async function runWatchlistAlerts(
       if (w.minPriceEur != null) conditions.push(sql`${listings.priceEur} >= ${w.minPriceEur}`);
       if (w.maxPriceEur != null) conditions.push(sql`${listings.priceEur} <= ${w.maxPriceEur}`);
       if (w.minYear != null) conditions.push(sql`${listings.year} >= ${w.minYear}`);
-      if (w.maxMileageKm != null)
-        conditions.push(sql`${listings.mileageKm} <= ${w.maxMileageKm}`);
+      if (w.maxMileageKm != null) conditions.push(sql`${listings.mileageKm} <= ${w.maxMileageKm}`);
       if (w.fuel) conditions.push(sql`${listings.fuel} = ${w.fuel}`);
       if (w.region) {
         const kraj = krajByName(w.region);
@@ -205,18 +207,17 @@ export async function runWatchlistAlerts(
 
   // Backstop: skip users who already got an alert within the last 20h even
   // if lastNotifiedAt failed to persist (belt and braces vs double-send).
+  const recentlyAlertedQuery = db
+    .select({ userId: events.userId })
+    .from(events)
+    .where(
+      and(
+        eq(events.type, 'watchlist_alert_sent'),
+        sql`${events.createdAt} > now() - interval '${sql.raw(String(BACKSTOP_HOURS))} hours'`,
+      ),
+    );
   const recentlyAlerted = new Set<string>(
-    (
-      await db
-        .select({ userId: events.userId })
-        .from(events)
-        .where(
-          and(
-            eq(events.type, 'watchlist_alert_sent'),
-            sql`${events.createdAt} > now() - interval '${sql.raw(String(BACKSTOP_HOURS))} hours'`,
-          ),
-        )
-    )
+    (await dbCall(() => recentlyAlertedQuery, { step: 'watchlist-alerts.backstop' }))
       .map((r) => r.userId)
       .filter((id): id is string => id != null),
   );
@@ -296,7 +297,8 @@ function buildWatchLabel(w: {
 }): string {
   const parts = [w.modelName];
   if (w.region) parts.push(`${w.region} kraj`);
-  if (w.maxPriceEur != null) parts.push(`do ${Math.round(w.maxPriceEur).toLocaleString('sk-SK')} €`);
+  if (w.maxPriceEur != null)
+    parts.push(`do ${Math.round(w.maxPriceEur).toLocaleString('sk-SK')} €`);
   if (w.minYear != null) parts.push(`od r. ${w.minYear}`);
   return parts.join(' · ');
 }

@@ -121,25 +121,29 @@ export function isConnectionError(e: unknown): boolean {
   return false;
 }
 
-// Per-process latch. On Vercel this resets with the lambda instance, which is
-// the granularity we want: one report per run, not one per query and not one
-// per deployment.
-let reported = false;
+// Suppresses duplicate reports for a short window rather than forever.
+//
+// A per-process 'reported once' latch looked right but was wrong: Vercel reuses
+// a warm instance across many invocations, and cron routes are exactly the
+// workload that keeps one warm. A permanent latch means run 2 of a multi-day
+// outage reports nothing, and a second unrelated outage hours later is dropped
+// silently. The cooldown collapses the 480-per-run storm (its actual job) while
+// still re-reporting each run. Sentry's fixed fingerprint keeps them one issue.
+const REPORT_COOLDOWN_MS = 5 * 60_000;
+let reportedAt = 0;
 
 /** Test seam — mirrors `__resetModelCache()` in lib/scraping/persist.ts. */
 export function __resetDbAvailability(): void {
-  reported = false;
-}
-
-/** True once this process has seen an outage. Loops use it to bail early. */
-export function isDbKnownUnavailable(): boolean {
-  return reported;
+  reportedAt = 0;
 }
 
 /**
- * Records an outage and returns the error to throw. The FIRST call in a process
- * sends one Sentry event under a fixed fingerprint; every later call is silent.
- * That is what turns 480 concurrent failures into a single alert.
+ * Records an outage and returns the error to throw.
+ *
+ * Deliberately NOT paired with an `isDbKnownUnavailable()` global that
+ * loops can consult: a process-wide 'database is down' flag survives the outage and turns
+ * later healthy runs into silent no-ops. Callers scope that decision to their
+ * own run instead — see resolveModelIds in lib/scraping/persist.ts.
  */
 export function noteDbUnavailable(
   cause: unknown,
@@ -148,8 +152,9 @@ export function noteDbUnavailable(
   if (cause instanceof DbUnavailableError) return cause;
   const wrapped = new DbUnavailableError(cause);
 
-  if (!reported) {
-    reported = true;
+  const now = Date.now();
+  if (now - reportedAt > REPORT_COOLDOWN_MS) {
+    reportedAt = now;
     console.error('db_unavailable', {
       ...context,
       error: cause instanceof Error ? cause.message : String(cause),

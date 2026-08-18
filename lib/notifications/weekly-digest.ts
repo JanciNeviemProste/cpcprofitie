@@ -9,6 +9,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { DIGEST_SUBJECT, WeeklyDigestEmail } from '@/emails/weekly-digest';
 import { getAppUrl } from '@/lib/app-url';
 import { getDb } from '@/lib/db';
+import { dbCall, isConnectionError, noteDbUnavailable } from '@/lib/db/errors';
 import { events, users, watchlist } from '@/lib/db/schema';
 import { getTrendingModels } from '@/lib/db/queries/trends';
 import { sendEmailBatch, isEmailLive } from '@/lib/email/send';
@@ -39,11 +40,12 @@ export async function runWeeklyDigest(opts: { dryRun?: boolean } = {}): Promise<
     mode: dryRun ? 'dry-run' : live ? 'live' : PROD ? 'disabled' : 'mock',
   };
 
-  const recipients = await db
+  const recipientsQuery = db
     .selectDistinct({ userId: users.id, email: users.email })
     .from(watchlist)
     .innerJoin(users, eq(users.id, watchlist.userId))
     .where(eq(watchlist.notifyByEmail, true));
+  const recipients = await dbCall(() => recipientsQuery, { step: 'weekly-digest.recipients' });
 
   stats.recipients = recipients.length;
   if (recipients.length === 0 || dryRun) return stats;
@@ -58,18 +60,17 @@ export async function runWeeklyDigest(opts: { dryRun?: boolean } = {}): Promise<
     return stats;
   }
 
+  const recentlySentQuery = db
+    .select({ userId: events.userId })
+    .from(events)
+    .where(
+      and(
+        eq(events.type, 'weekly_digest_sent'),
+        sql`${events.createdAt} > now() - interval '${sql.raw(String(BACKSTOP_DAYS))} days'`,
+      ),
+    );
   const recentlySent = new Set<string>(
-    (
-      await db
-        .select({ userId: events.userId })
-        .from(events)
-        .where(
-          and(
-            eq(events.type, 'weekly_digest_sent'),
-            sql`${events.createdAt} > now() - interval '${sql.raw(String(BACKSTOP_DAYS))} days'`,
-          ),
-        )
-    )
+    (await dbCall(() => recentlySentQuery, { step: 'weekly-digest.backstop' }))
       .map((r) => r.userId)
       .filter((id): id is string => id != null),
   );
@@ -108,6 +109,7 @@ export async function runWeeklyDigest(opts: { dryRun?: boolean } = {}): Promise<
         })),
       );
     } catch (e) {
+      if (isConnectionError(e)) throw noteDbUnavailable(e, { step: 'weekly-digest.recordEvents' });
       Sentry.captureException(e, {
         tags: { component: 'weekly-digest', step: 'recordEvents' },
       });

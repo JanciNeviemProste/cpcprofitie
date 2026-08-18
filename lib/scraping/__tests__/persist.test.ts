@@ -117,3 +117,50 @@ describe('upsertListings when the database is healthy', () => {
     expect(opts).toMatchObject({ tags: { component: 'persist' } });
   });
 });
+
+// Regression: deduplicating by modelSlug must not let a row whose make failed
+// to parse poison siblings that parsed fine. autobazar.eu sets makeSlug and
+// modelSlug independently (lib/scraping/sources/autobazar-eu.ts:130-131), so a
+// batch can hold both shapes for the same slug, in scrape-page order.
+describe('model dedup across rows with differing makeSlug', () => {
+  function pair(): NormalizedListing[] {
+    const base = row(0);
+    return [
+      // Make failed to parse — ensureModelId bails before touching the DB.
+      { ...base, sourceId: 'a', modelSlug: 'outlander', makeSlug: null },
+      // Same slug, make parsed fine — must still resolve.
+      { ...base, sourceId: 'b', modelSlug: 'outlander', makeSlug: 'mitsubishi' },
+    ];
+  }
+
+  it('resolves the slug when any row in the batch carries a usable makeSlug', async () => {
+    await upsertListings(pair());
+    // A lookup only happens when a usable makeSlug was found.
+    expect(state.selects).toBeGreaterThan(0);
+  });
+
+  it('resolves regardless of which row comes first', async () => {
+    await upsertListings(pair().reverse());
+    expect(state.selects).toBeGreaterThan(0);
+  });
+});
+
+// Regression: an outage must not leave the process permanently degraded.
+// A module-level "db is down" flag made every later batch return an empty map
+// with no worker throwing — 200 OK, zero Sentry events, every listing written
+// with model_id = null. Silently worse than the bug this file exists to fix.
+describe('recovery after an outage in the same process', () => {
+  it('resolves models normally once the database comes back', async () => {
+    state.fail = Object.assign(new Error('(ENOTFOUND) tenant/user postgres.x not found'), {
+      code: 'ENOTFOUND',
+    });
+    await expect(upsertListings(ROWS)).rejects.toBeInstanceOf(DbUnavailableError);
+
+    // Database recovers. Deliberately do NOT reset the module state — that is
+    // the whole point: a warm lambda keeps serving with it still set.
+    state.fail = null;
+    state.selects = 0;
+    await expect(upsertListings(ROWS)).resolves.toMatchObject({ skipped: 0 });
+    expect(state.selects).toBeGreaterThan(0);
+  });
+});

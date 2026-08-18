@@ -115,13 +115,30 @@ describe('GET /api/health?deep=1', () => {
     const body = (await res.json()) as {
       status: string;
       checks: { db: boolean };
+      missingRequired: string[];
       dbProbe: { reachable: boolean; error: string };
     };
     expect(res.status).toBe(503);
     expect(body.status).toBe('error');
-    expect(body.checks.db).toBe(false);
     expect(body.dbProbe).toMatchObject({ reachable: false, error: 'connection_failed' });
+    // checks.db means "a connection string is configured", which it still is.
+    // Collapsing it with reachability made missingRequired claim the env var
+    // was absent — the opposite diagnosis to "the server is gone".
+    expect(body.checks.db).toBe(true);
+    expect(body.missingRequired).not.toContain('db');
   });
+
+  it('labels a hung connection as a timeout, not a query failure', async () => {
+    process.env.DATABASE_URL = 'postgres://localhost/test';
+    vi.doMock('@/lib/db', () => ({
+      getDb: () => ({ execute: () => new Promise(() => {}) }), // never settles
+    }));
+    const { GET: freshGet } = await import('../route');
+    const res = await freshGet(req('?deep=1'));
+    const body = (await res.json()) as { dbProbe: { error: string } };
+    expect(res.status).toBe(503);
+    expect(body.dbProbe.error).toBe('timeout');
+  }, 15_000);
 
   it('reports reachable when select 1 succeeds', async () => {
     process.env.DATABASE_URL = 'postgres://localhost/test';

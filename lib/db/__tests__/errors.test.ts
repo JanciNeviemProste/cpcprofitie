@@ -8,7 +8,6 @@ import {
   __resetDbAvailability,
   dbCall,
   isConnectionError,
-  isDbKnownUnavailable,
   noteDbUnavailable,
 } from '../errors';
 
@@ -109,10 +108,21 @@ describe('noteDbUnavailable — one report per run', () => {
     });
   });
 
-  it('flips isDbKnownUnavailable so loops can bail early', () => {
-    expect(isDbKnownUnavailable()).toBe(false);
+  it('re-reports once the cooldown lapses, so a multi-day outage keeps alerting', () => {
+    // A permanent latch would go quiet after run 1 on a warm Vercel instance,
+    // making an ongoing outage look resolved.
+    const now = Date.parse('2026-08-18T00:00:00Z');
+    const clock = vi.spyOn(Date, 'now');
+
+    clock.mockReturnValue(now);
     noteDbUnavailable(withCode('boom', 'ENOTFOUND'), {});
-    expect(isDbKnownUnavailable()).toBe(true);
+    clock.mockReturnValue(now + 60_000); // same run, still quiet
+    noteDbUnavailable(withCode('boom', 'ENOTFOUND'), {});
+    expect(captureException).toHaveBeenCalledTimes(1);
+
+    clock.mockReturnValue(now + 6 * 60_000); // a later run
+    noteDbUnavailable(withCode('boom', 'ENOTFOUND'), {});
+    expect(captureException).toHaveBeenCalledTimes(2);
   });
 
   it('returns a DbUnavailableError carrying the original cause', () => {

@@ -6,7 +6,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import * as Sentry from '@sentry/nextjs';
 import { getDb } from '@/lib/db';
-import { isConnectionError, isDbKnownUnavailable, noteDbUnavailable } from '@/lib/db/errors';
+import { isConnectionError, noteDbUnavailable } from '@/lib/db/errors';
 import { hasDatabaseUrl } from '@/lib/db/url';
 import {
   listingDetails,
@@ -38,9 +38,6 @@ function hasDb(): boolean {
 // just means the first listing per slug per cold start pays the round trip.
 const makeIdCache = new Map<string, number>();
 const modelIdCache = new Map<string, number>();
-// Slugs we already failed to resolve. Without this a query-level failure is
-// retried (2-3 round trips) for every subsequent listing sharing the slug.
-const unresolvableModelSlugs = new Set<string>();
 
 /** How many model lookups may be in flight at once. Kept under the postgres.js
  *  default pool size (max: 10) so a large batch queues in our code rather than
@@ -51,7 +48,6 @@ const MODEL_RESOLVE_CONCURRENCY = 8;
 export function __resetModelCache(): void {
   makeIdCache.clear();
   modelIdCache.clear();
-  unresolvableModelSlugs.clear();
 }
 
 async function ensureMakeId(makeSlug: string): Promise<number | null> {
@@ -105,7 +101,6 @@ export async function ensureModelId(
   if (!modelSlug) return null;
   const cached = modelIdCache.get(modelSlug);
   if (cached) return cached;
-  if (unresolvableModelSlugs.has(modelSlug)) return null;
   if (!makeSlug) return null;
   try {
     const db = getDb();
@@ -119,10 +114,7 @@ export async function ensureModelId(
       return found[0]!.id;
     }
     const makeId = await ensureMakeId(makeSlug);
-    if (!makeId) {
-      unresolvableModelSlugs.add(modelSlug);
-      return null;
-    }
+    if (!makeId) return null;
     const id = 1_000_000 + (hash32(modelSlug) & 0x7fffff);
     await db
       .insert(vehicleModels)
@@ -155,7 +147,6 @@ export async function ensureModelId(
       tags: { component: 'persist', step: 'ensureModelId' },
       extra: { makeSlug, modelSlug },
     });
-    unresolvableModelSlugs.add(modelSlug);
     return null;
   }
 }
@@ -175,28 +166,55 @@ export async function ensureModelId(
 async function resolveModelIds(rows: NormalizedListing[]): Promise<Map<string, number | null>> {
   const wanted = new Map<string, { makeSlug: string | null; displayName: string | null }>();
   for (const r of rows) {
-    if (!r.modelSlug || wanted.has(r.modelSlug)) continue;
-    wanted.set(r.modelSlug, { makeSlug: r.makeSlug, displayName: r.rawTitle });
+    if (!r.modelSlug) continue;
+    const seen = wanted.get(r.modelSlug);
+    // Prefer whichever row actually parsed a make: ensureModelId bails without
+    // one, so letting a make-less row win would drop model_id for every sibling
+    // sharing the slug. autobazar.eu parses make and model independently, so a
+    // batch really does contain both shapes in arbitrary order.
+    if (seen && (seen.makeSlug || !r.makeSlug)) continue;
+    wanted.set(r.modelSlug, {
+      makeSlug: r.makeSlug,
+      displayName: r.rawTitle ?? seen?.displayName ?? null,
+    });
   }
 
   const queue = [...wanted.entries()];
   const resolved = new Map<string, number | null>();
   let cursor = 0;
 
+  // Scoped to THIS call on purpose. A module-level "db is down" flag would
+  // outlive the outage and turn every later batch in a warm lambda into a
+  // silent no-op that writes null model_ids and reports success.
+  let outage: unknown;
+
   async function worker(): Promise<void> {
-    while (cursor < queue.length) {
-      // Another worker already hit the outage — everything after this point
-      // would fail identically, so stop rather than pile on.
-      if (isDbKnownUnavailable()) return;
+    while (cursor < queue.length && outage === undefined) {
       const [modelSlug, meta] = queue[cursor++]!;
-      resolved.set(modelSlug, await ensureModelId(meta.makeSlug, modelSlug, meta.displayName));
+      try {
+        resolved.set(modelSlug, await ensureModelId(meta.makeSlug, modelSlug, meta.displayName));
+      } catch (e) {
+        // ensureModelId only throws for an outage; everything else returns null.
+        // Stop the siblings rather than let them pile on the same dead server.
+        outage = e;
+        return;
+      }
     }
   }
 
-  // A rejecting worker (DbUnavailableError) propagates and aborts the batch.
   await Promise.all(
     Array.from({ length: Math.min(MODEL_RESOLVE_CONCURRENCY, queue.length) }, () => worker()),
   );
+  if (outage !== undefined) throw outage;
+  // Belt and braces: a partially filled map would read downstream as "these
+  // slugs legitimately have no model", which is exactly the silent data loss
+  // this whole change exists to prevent.
+  if (resolved.size !== queue.length) {
+    throw noteDbUnavailable(
+      new Error(`model resolution incomplete: ${resolved.size}/${queue.length}`),
+      { step: 'resolveModelIds' },
+    );
+  }
   return resolved;
 }
 

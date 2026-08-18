@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
+import { DbUnavailableError } from '@/lib/db/errors';
 import { runWatchlistAlerts } from '@/lib/notifications/watchlist-alerts';
 
 // Daily watchlist alert sweep (06:00 UTC via vercel.json). Matches new
@@ -34,6 +35,11 @@ export async function GET(request: Request) {
     }
     return NextResponse.json({ stats, elapsedMs });
   } catch (e) {
+    // Already reported once by noteDbUnavailable; a second capture here would
+    // break the one-event-per-run guarantee and 500 would misreport an outage.
+    if (e instanceof DbUnavailableError) {
+      return NextResponse.json({ error: 'db_unavailable' }, { status: 503 });
+    }
     Sentry.captureException(e, { tags: { component: 'watchlist-alerts-cron' } });
     return NextResponse.json(
       {

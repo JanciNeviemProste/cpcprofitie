@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
+import { DbUnavailableError } from '@/lib/db/errors';
 import { runWeeklyDigest } from '@/lib/notifications/weekly-digest';
 
 // Weekly market digest (Mon 07:00 UTC via vercel.json) for users with at
@@ -33,6 +34,11 @@ export async function GET(request: Request) {
     }
     return NextResponse.json({ stats, elapsedMs });
   } catch (e) {
+    // Already reported once by noteDbUnavailable; a second capture here would
+    // break the one-event-per-run guarantee and 500 would misreport an outage.
+    if (e instanceof DbUnavailableError) {
+      return NextResponse.json({ error: 'db_unavailable' }, { status: 503 });
+    }
     Sentry.captureException(e, { tags: { component: 'weekly-digest-cron' } });
     return NextResponse.json(
       {
