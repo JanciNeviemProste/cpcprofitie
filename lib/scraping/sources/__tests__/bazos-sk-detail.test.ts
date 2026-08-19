@@ -33,7 +33,7 @@ describe('bazos.sk parseDetailPage', () => {
     // lands on the exact vehicle_models row a list scrape would produce.
     const d = parseDetailPage(FIXTURE, STUB_LISTING);
     expect(d.identity?.makeSlug).toBe('ford');
-    expect(d.identity?.modelSlug).toBe('ford-kuga');
+    expect(d.identity?.modelSlug).toBe('kuga');
     expect(d.identity?.rawTitle).toMatch(/Ford Kuga/i);
   });
 

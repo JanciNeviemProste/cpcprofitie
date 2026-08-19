@@ -17,6 +17,7 @@ import {
   vehicleModels,
 } from '@/lib/db/schema';
 import { computeFingerprint } from '@/lib/dedup/fingerprint';
+import { resolveBrand } from './vehicle-dictionary';
 import type { NormalizedDetail, NormalizedListing, ScrapeResult, Source } from './types';
 
 export type UpsertCounts = {
@@ -51,6 +52,9 @@ export function __resetModelCache(): void {
 }
 
 async function ensureMakeId(makeSlug: string): Promise<number | null> {
+  // Second line of defence: ensureModelId already resolves the brand, but this
+  // stays reachable and must never mint a make from an unrecognised token.
+  if (!resolveBrand(makeSlug)) return null;
   const cached = makeIdCache.get(makeSlug);
   if (cached) return cached;
   try {
@@ -96,42 +100,51 @@ async function ensureMakeId(makeSlug: string): Promise<number | null> {
 export async function ensureModelId(
   makeSlug: string | null,
   modelSlug: string | null,
-  displayName: string | null,
 ): Promise<number | null> {
-  if (!modelSlug) return null;
-  const cached = modelIdCache.get(modelSlug);
+  if (!modelSlug || !makeSlug) return null;
+  // Free text reaches this function, so the brand has to clear the dictionary
+  // before anything is written. Without this the catalog grew makes called
+  // `predam` and `rozpredam` straight out of listing titles.
+  const brand = resolveBrand(makeSlug);
+  if (!brand) return null;
+
+  // Keyed by brand as well as model: slugs are bare ("golf", "octavia"), so the
+  // same model slug can legitimately exist under two different makes.
+  const key = `${brand}::${modelSlug}`;
+  const cached = modelIdCache.get(key);
   if (cached) return cached;
-  if (!makeSlug) return null;
   try {
     const db = getDb();
+    const makeId = await ensureMakeId(brand);
+    if (!makeId) return null;
     const found = await db
       .select({ id: vehicleModels.id })
       .from(vehicleModels)
-      .where(eq(vehicleModels.slug, modelSlug))
+      .where(and(eq(vehicleModels.makeId, makeId), eq(vehicleModels.slug, modelSlug)))
       .limit(1);
     if (found.length > 0) {
-      modelIdCache.set(modelSlug, found[0]!.id);
+      modelIdCache.set(key, found[0]!.id);
       return found[0]!.id;
     }
-    const makeId = await ensureMakeId(makeSlug);
-    if (!makeId) return null;
-    const id = 1_000_000 + (hash32(modelSlug) & 0x7fffff);
+    const id = 1_000_000 + (hash32(`${brand}-${modelSlug}`) & 0x7fffff);
     await db
       .insert(vehicleModels)
       .values({
         id,
         makeId,
+        // The model's own name — never the listing title. Passing the title
+        // through produced catalog entries called "Predám Škoda Octavia 2.0 TDI".
         slug: modelSlug,
-        name: displayName ?? toTitleCase(modelSlug),
+        name: toTitleCase(modelSlug),
       })
       .onConflictDoNothing({ target: [vehicleModels.makeId, vehicleModels.slug] });
     const refound = await db
       .select({ id: vehicleModels.id })
       .from(vehicleModels)
-      .where(eq(vehicleModels.slug, modelSlug))
+      .where(and(eq(vehicleModels.makeId, makeId), eq(vehicleModels.slug, modelSlug)))
       .limit(1);
     const finalId = refound[0]?.id ?? id;
-    modelIdCache.set(modelSlug, finalId);
+    modelIdCache.set(key, finalId);
     return finalId;
   } catch (e) {
     // An unreachable server is not a per-model problem: report it once and let
@@ -192,7 +205,7 @@ async function resolveModelIds(rows: NormalizedListing[]): Promise<Map<string, n
     while (cursor < queue.length && outage === undefined) {
       const [modelSlug, meta] = queue[cursor++]!;
       try {
-        resolved.set(modelSlug, await ensureModelId(meta.makeSlug, modelSlug, meta.displayName));
+        resolved.set(modelSlug, await ensureModelId(meta.makeSlug, modelSlug));
       } catch (e) {
         // ensureModelId only throws for an outage; everything else returns null.
         // Stop the siblings rather than let them pile on the same dead server.
@@ -558,11 +571,7 @@ export async function persistDetails(details: NormalizedDetail[]): Promise<Detai
         if (d.identity.rawTitle) {
           set.rawTitle = sql`coalesce(${listings.rawTitle}, ${d.identity.rawTitle})`;
         }
-        const modelId = await ensureModelId(
-          d.identity.makeSlug,
-          d.identity.modelSlug,
-          d.identity.rawTitle,
-        );
+        const modelId = await ensureModelId(d.identity.makeSlug, d.identity.modelSlug);
         if (modelId != null) {
           set.modelId = sql`coalesce(${listings.modelId}, ${modelId})`;
         }

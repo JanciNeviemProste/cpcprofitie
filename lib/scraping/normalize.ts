@@ -1,4 +1,5 @@
 import type { RawFuel, RawTransmission } from './types';
+import { modelsFor, resolveBrand } from './vehicle-dictionary';
 
 const FUEL_MAP: Record<string, RawFuel> = {
   // SK
@@ -98,19 +99,55 @@ export function slugify(raw: string): string {
     .replace(/(^-|-$)/g, '');
 }
 
-// Heuristic make/model extraction from a free-text title like
-// "Škoda Octavia 2.0 TDI Combi 2019" — replace with DB-backed canonical
-// matching once vehicle_makes/vehicle_models is seeded.
+// Heuristic make/model extraction from a free-text title.
+//
+// This used to take the first two words, which works on a car marketplace
+// ("Škoda Octavia 2.0 TDI") and fails on a classifieds board, where titles read
+// "Predám Škoda Octavia" or "Ľavé bočné dvere Škoda Fabia". That produced makes
+// called `predam` and `rozpredam`, and split VW across `vw` and `volkswagen`.
+//
+// Now the title is scanned for the first token that is a KNOWN brand, and the
+// model is taken from what follows. When no brand is recognised the result is
+// null: a listing with no model is a clean unknown, whereas an invented one
+// silently poisons the cohort medians that DealScore is built on. That also
+// keeps parts listings ("Kolesá", "205/55R16") out of the catalog entirely.
+//
+// Slugs follow the catalog convention: make `skoda`, model `octavia` — bare,
+// not brand-prefixed. The previous `${make}-${model}` form never matched a
+// seeded row, so every seeded model sat unused beside an auto-created twin.
 export function parseMakeModel(title: string | null | undefined): {
   makeSlug: string | null;
   modelSlug: string | null;
 } {
   if (!title) return { makeSlug: null, modelSlug: null };
-  const tokens = title.trim().split(/\s+/);
-  if (tokens.length < 2) return { makeSlug: slugify(tokens[0] ?? ''), modelSlug: null };
-  const make = slugify(tokens[0]!);
-  const model = slugify(tokens[1]!);
-  return { makeSlug: make, modelSlug: `${make}-${model}` };
+  const tokens = title
+    .trim()
+    .split(WHITESPACE_RE)
+    .map((t) => slugify(t))
+    .filter((t) => t.length > 0);
+
+  for (let i = 0; i < tokens.length; i++) {
+    // Two-token brands first ("Land Rover", "Alfa Romeo", "Mercedes Benz"),
+    // otherwise "land" would resolve and swallow "rover" as the model.
+    const paired = i + 1 < tokens.length ? `${tokens[i]}-${tokens[i + 1]}` : null;
+    const pairedBrand = paired ? resolveBrand(paired) : null;
+    const brand = pairedBrand ?? resolveBrand(tokens[i]);
+    if (!brand) continue;
+
+    const after = i + (pairedBrand ? 2 : 1);
+    const known = modelsFor(brand);
+    const one = tokens[after] ?? null;
+    const two = one && tokens[after + 1] ? `${one}-${tokens[after + 1]}` : null;
+
+    // Longest match wins: "octavia-combi" before "octavia", "3-series" before "3".
+    if (two && known.has(two)) return { makeSlug: brand, modelSlug: two };
+    if (one && known.has(one)) return { makeSlug: brand, modelSlug: one };
+    // Brand recognised but the model isn't in the dictionary — attach the
+    // listing to the brand and leave the model open rather than inventing one.
+    return { makeSlug: brand, modelSlug: null };
+  }
+
+  return { makeSlug: null, modelSlug: null };
 }
 
 // ─── Free-text extractors (used by source plugins) ────────────────────────────

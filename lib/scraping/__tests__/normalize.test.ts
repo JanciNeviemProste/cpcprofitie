@@ -56,8 +56,53 @@ describe('parseMakeModel', () => {
   it('reads make and model from the title head', () => {
     expect(parseMakeModel('Škoda Octavia 2.0 TDI Combi')).toEqual({
       makeSlug: 'skoda',
-      modelSlug: 'skoda-octavia',
+      modelSlug: 'octavia',
     });
     expect(parseMakeModel(null)).toEqual({ makeSlug: null, modelSlug: null });
+  });
+
+  // Bazoš titles are free text, and the old first-two-words rule turned them
+  // into makes called `predam`, split VW across two brands, and pulled wheels
+  // and door panels into the vehicle catalog.
+  it('finds the brand anywhere in the title, not just at the head', () => {
+    expect(parseMakeModel('Predám Škoda Octavia 2.0 TDI')).toEqual({
+      makeSlug: 'skoda',
+      modelSlug: 'octavia',
+    });
+    expect(parseMakeModel('Ľavé bočné dvere Škoda Fabia 1 strana vodiča')).toEqual({
+      makeSlug: 'skoda',
+      modelSlug: 'fabia',
+    });
+  });
+
+  it('gives an alias and its canonical spelling the same identity', () => {
+    // 1 791 VW listings were split between `vw` and `volkswagen`, halving the
+    // cohort every median is computed from.
+    expect(parseMakeModel('VW Golf 1.6 TDI')).toEqual(parseMakeModel('Volkswagen Golf 1.6 TDI'));
+    expect(parseMakeModel('Mercedes C 220')?.makeSlug).toBe('mercedes-benz');
+  });
+
+  it('returns nothing rather than inventing a make', () => {
+    // A null model is a clean unknown; an invented one poisons cohort medians.
+    for (const junk of ['Kolesá', '205/55R16', 'Rozpredám golf 4 96kw', 'Sada zámku']) {
+      expect(parseMakeModel(junk)).toEqual({ makeSlug: null, modelSlug: null });
+    }
+  });
+
+  it('prefers the longer model name and handles two-word brands', () => {
+    expect(parseMakeModel('Škoda Octavia Combi 2.0')).toEqual({
+      makeSlug: 'skoda',
+      modelSlug: 'octavia-combi',
+    });
+    expect(parseMakeModel('Land Rover Discovery 3.0')).toEqual({
+      makeSlug: 'land-rover',
+      modelSlug: 'discovery',
+    });
+  });
+
+  it('keeps the brand when the model is unknown', () => {
+    const r = parseMakeModel('Audi Q9 prototyp');
+    expect(r.makeSlug).toBe('audi');
+    expect(r.modelSlug).toBeNull();
   });
 });

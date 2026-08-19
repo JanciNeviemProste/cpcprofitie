@@ -68,7 +68,7 @@ export async function backfillModelId(
     for (const r of rows) {
       const { makeSlug, modelSlug } = parseMakeModel(r.raw_title);
       if (!modelSlug) continue;
-      const modelId = await ensureModelId(makeSlug, modelSlug, r.raw_title);
+      const modelId = await ensureModelId(makeSlug, modelSlug);
       if (modelId == null) continue;
       stats.resolved++;
       const idStr = typeof r.id === 'bigint' ? r.id.toString() : String(r.id);
