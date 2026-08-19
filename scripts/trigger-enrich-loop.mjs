@@ -95,7 +95,7 @@ async function callOnce() {
     consecutiveErrors = 0;
     const totalSecs = ((Date.now() - startedAt) / 1000).toFixed(0);
     console.log(
-      `[${source}${partitionTag}][${ts}] inv ${invocation}: ${parsed.totalFetched}/${parsed.batches * 10} fetched, ${parsed.totalDetails} details, ${parsed.totalErrors} errors, ${(ms / 1000).toFixed(0)}s. ` +
+      `[${source}${partitionTag}][${ts}] inv ${invocation}: ${parsed.totalFetched}/${parsed.batches * 10} fetched, ${parsed.totalDetails} saved, ${parsed.totalSkipped ?? 0} skipped, ${parsed.totalErrors} errors, ${(ms / 1000).toFixed(0)}s. ` +
         `done=${parsed.done}. running total=${runningTotal} in ${totalSecs}s`,
     );
     return { done: parsed.done === true, fatal: false };

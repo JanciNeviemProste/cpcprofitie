@@ -66,8 +66,12 @@ export function parseDetailPage(html: string, listing: NormalizedListing): Norma
   const popisText = $popis.length > 0 ? $popis.text() : '';
   const labelText = popisText.trim().length > 0 ? popisText : fullText;
 
-  const bodyType = extractAfterLabel(labelText, 'Karoséria');
-  const colorExterior = extractAfterLabel(labelText, 'Farba');
+  // Bounded: sellers write prose, and "Karoséria aj interiér sú vzhľadom na vek
+  // vozidla vo veľmi peknom stave" makes the label lookup return a whole
+  // sentence. That is 73 characters into a varchar(32) — the insert failed and
+  // took the entire listing's detail row with it.
+  const bodyType = boundedLabel(labelText, 'Karoséria', 32);
+  const colorExterior = boundedLabel(labelText, 'Farba', 64);
   const vinRaw = extractAfterLabel(labelText, 'VIN');
   const vin = isPlausibleVin(vinRaw) ? vinRaw : null;
   const powerKw = parseFirstInt(extractAfterLabel(labelText, 'Výkon'));
@@ -203,6 +207,17 @@ function parseYearFromLabel(s: string | null): number | null {
   if (!m) return null;
   const n = Number(m[1]);
   return Number.isFinite(n) && n >= 1980 && n <= new Date().getFullYear() + 1 ? n : null;
+}
+
+/**
+ * A label lookup bounded by the column it will be written to. A value longer
+ * than the column is prose that happened to follow the label, not a value —
+ * storing it truncated ("aj interiér sú vzhľadom na") would be worse than
+ * storing nothing, and storing it whole fails the insert.
+ */
+function boundedLabel(text: string, label: string, maxLen: number): string | null {
+  const value = extractAfterLabel(text, label);
+  return value !== null && value.length <= maxLen ? value : null;
 }
 
 function extractAfterLabel(text: string, label: string): string | null {

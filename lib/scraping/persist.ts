@@ -491,6 +491,10 @@ export async function persistDetails(details: NormalizedDetail[]): Promise<Detai
           sourceId: d.sourceId,
           error: e instanceof Error ? e.message : e,
         });
+        Sentry.captureException(e, {
+          tags: { component: 'persist', step: 'persistDetails.gone' },
+          extra: { source: d.source, sourceId: d.sourceId },
+        });
         skipped++;
       }
       continue;
@@ -501,12 +505,12 @@ export async function persistDetails(details: NormalizedDetail[]): Promise<Detai
         .insert(listingDetails)
         .values({
           listingId,
-          bodyType: d.bodyType,
-          colorExterior: d.colorExterior,
-          colorInterior: d.colorInterior,
+          bodyType: clamp(d.bodyType, 32),
+          colorExterior: clamp(d.colorExterior, 64),
+          colorInterior: clamp(d.colorInterior, 64),
           powerKw: d.powerKw,
           engineCcm: d.engineCcm,
-          vin: d.vin,
+          vin: clamp(d.vin, 17),
           sellerType: d.sellerType,
           sellerName: d.sellerName,
           description: d.description,
@@ -586,10 +590,25 @@ export async function persistDetails(details: NormalizedDetail[]): Promise<Detai
         sourceId: d.sourceId,
         error: e instanceof Error ? e.message : e,
       });
+      // These two were the only paths in this file that stayed off Sentry, which
+      // is why a 100% write-failure rate went unnoticed for hours.
+      Sentry.captureException(e, {
+        tags: { component: 'persist', step: 'persistDetails.row' },
+        extra: { source: d.source, sourceId: d.sourceId },
+      });
       skipped++;
     }
   }
   return { detailsUpserted, photosInserted, skipped };
+}
+
+/** Guards the varchar widths in lib/db/schema.ts. A single over-long value used
+ *  to fail the insert and lose the whole detail row — the same defence already
+ *  applied to description and photo URLs. Dropping the value beats truncating
+ *  it: a clipped sentence in body_type is worse than an empty column. */
+function clamp(value: string | null | undefined, maxLen: number): string | null {
+  if (value == null) return null;
+  return value.length <= maxLen ? value : null;
 }
 
 function hash32(s: string): number {

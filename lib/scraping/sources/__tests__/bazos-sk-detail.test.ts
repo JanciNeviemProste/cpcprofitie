@@ -141,3 +141,37 @@ describe('bazos.sk detail — dealer-written headers', () => {
     }
   });
 });
+
+describe('bazos.sk detail — labels that run into prose', () => {
+  // Real failure, listing 194634446: the description read "Karoséria aj interiér
+  // sú vzhľadom na vek vozidla vo veľmi peknom a zachovalom stave." The label
+  // lookup returned that whole sentence — 73 characters into a varchar(32) — the
+  // insert failed, and the listing's entire detail row was lost. Every write in
+  // the sampled production logs failed this way.
+  const PROSE = `
+    <html><body><div class="popisdetail">
+      Predám VW Sharan LIFE 2.0 TDI 130 kW DSG.
+      Karoséria aj interiér sú vzhľadom na vek vozidla vo veľmi peknom a zachovalom stave.
+      Farba je metalíza s prelakovaným pravým predným blatníkom po drobnom oděru z parkoviska.
+      Prvá evidencia 08/2013
+      Najazdené 226 000 km
+    </div></body></html>`;
+
+  function parse() {
+    return parseDetailPage(PROSE, stub('194634446', 'https://auto.bazos.sk/inzerat/194634446/x.php'));
+  }
+
+  it('drops an over-long body type instead of storing a clipped sentence', () => {
+    expect(parse().bodyType).toBeNull();
+  });
+
+  it('drops an over-long colour the same way', () => {
+    expect(parse().colorExterior).toBeNull();
+  });
+
+  it('still reads the values that are genuinely short', () => {
+    const d = parse();
+    expect(d.listingOverrides?.year).toBe(2013);
+    expect(d.listingOverrides?.mileageKm).toBe(226000);
+  });
+});

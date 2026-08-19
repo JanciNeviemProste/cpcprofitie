@@ -2,10 +2,7 @@ import { NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
 import { DbUnavailableError, isConnectionError, noteDbUnavailable } from '@/lib/db/errors';
 import { getSource } from '@/lib/scraping';
-import {
-  loadUnenrichedBatch,
-  type EnrichSelectMode,
-} from '@/lib/scraping/enrich-batch-loader';
+import { loadUnenrichedBatch, type EnrichSelectMode } from '@/lib/scraping/enrich-batch-loader';
 import { persistDetails, runEnrichment } from '@/lib/scraping';
 import { ALL_SOURCES, type Source } from '@/lib/scraping';
 
@@ -75,10 +72,7 @@ export async function POST(request: Request) {
       ? { index: payload.partition, modulo: payload.modulo }
       : undefined;
   if (!sourceId || !ALL_SOURCES.includes(sourceId as Source)) {
-    return NextResponse.json(
-      { error: 'invalid_source', valid: ALL_SOURCES },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: 'invalid_source', valid: ALL_SOURCES }, { status: 400 });
   }
   const source = getSource(sourceId as Source);
   if (!source.detailUrl || !source.parseDetailPage) {
@@ -89,6 +83,7 @@ export async function POST(request: Request) {
   const deadline = startedAt + TIME_BUDGET_MS;
   let totalFetched = 0;
   let totalDetails = 0;
+  let totalSkipped = 0;
   let totalErrors = 0;
   let batches = 0;
   let done = false;
@@ -126,9 +121,15 @@ export async function POST(request: Request) {
         limit: BATCH_SIZE,
         delayMs: DELAY_MS,
       });
-      if (result.details.length > 0) await persistDetails(result.details);
+      // Count what reached the database, not what came back from the parser.
+      // These used to be the same number, so a run that persisted nothing still
+      // reported full success — 3 000 "details" against 221 actual rows.
+      if (result.details.length > 0) {
+        const saved = await persistDetails(result.details);
+        totalDetails += saved.detailsUpserted;
+        totalSkipped += saved.skipped;
+      }
       totalFetched += result.fetched;
-      totalDetails += result.details.length;
       totalErrors += result.errors.length;
       for (const e of result.errors) {
         if (sampleErrors.length < 5) sampleErrors.push(e);
@@ -153,6 +154,7 @@ export async function POST(request: Request) {
     batches,
     totalFetched,
     totalDetails,
+    totalSkipped,
     totalErrors,
     sampleErrors,
     // The driver must send this back as `afterId` next invocation so the walk
