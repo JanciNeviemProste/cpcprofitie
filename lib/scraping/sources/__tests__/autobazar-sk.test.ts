@@ -86,7 +86,33 @@ describe('autobazar.sk parseListingsPage', () => {
 
   it('source descriptor pageUrl is valid', () => {
     const url = autobazarSk.pageUrl({ page: 2 });
-    expect(url).toMatch(/^https:\/\/[a-z-]+\.autobazar\.sk\/$/);
+    // Page 2 now carries the pagination key; it used to be brand page one again.
+    expect(url).toMatch(/^https:\/\/[a-z-]+\.autobazar\.sk\/(\?p\[page\]=\d+)?$/);
     expect(() => new URL(url)).not.toThrow();
+  });
+});
+
+describe('autobazar.sk pageUrl', () => {
+  // The source sat at ~700 listings because every page returned brand page one.
+  // `?page=`, `/2/` and `?strana=` are all ignored by the site; `?p[page]=` is
+  // the one that actually advances.
+  it('starts each brand on its bare subdomain', () => {
+    expect(autobazarSk.pageUrl({ page: 1 })).toBe('https://audi.autobazar.sk/');
+  });
+
+  it('paginates within a brand using the array-style key', () => {
+    expect(autobazarSk.pageUrl({ page: 2 })).toBe('https://audi.autobazar.sk/?p[page]=2');
+    expect(autobazarSk.pageUrl({ page: 25 })).toBe('https://audi.autobazar.sk/?p[page]=25');
+  });
+
+  it('moves to the next brand once a brand is exhausted', () => {
+    expect(autobazarSk.pageUrl({ page: 26 })).toBe('https://bmw.autobazar.sk/');
+    expect(autobazarSk.pageUrl({ page: 27 })).toBe('https://bmw.autobazar.sk/?p[page]=2');
+  });
+
+  it('covers every brand before wrapping', () => {
+    const urls = new Set<string>();
+    for (let p = 1; p <= 35 * 25; p += 25) urls.add(autobazarSk.pageUrl({ page: p }));
+    expect(urls.size).toBe(35);
   });
 });

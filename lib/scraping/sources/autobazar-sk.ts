@@ -139,7 +139,17 @@ export function parseListingsPage(html: string): NormalizedListing[] {
 // autobazar.sk client-side renders the main /inzeraty/ listing — server HTML
 // only contains the featured panel (~20 listings) and ignores ?page=N. Brand
 // subdomains (e.g. audi.autobazar.sk) DO server-render per-brand pages with
-// 20 unique listings each. We iterate top brands instead of paginated index.
+// 20 unique listings each, and they paginate.
+//
+// The pagination parameter is `?p[page]=N` — an array-style query key. Plain
+// `?page=`, `/2/` and `?strana=` all return page one again, which is how this
+// source sat at ~700 listings while the brands hold roughly ten times that
+// (audi 345, bmw 403, skoda 328, ford 234, volkswagen 216 — measured 2026-08-19).
+// Nothing errored: repeated pages deduplicated on upsert and the run reported
+// success with added: 0.
+/** Pages walked per brand before moving to the next one. */
+const PAGES_PER_BRAND = 25;
+
 const TOP_BRANDS = [
   'audi',
   'bmw',
@@ -182,8 +192,16 @@ export const autobazarSk: ScraperSource = {
   id: 'autobazar.sk',
   baseUrl: BASE,
   pageUrl({ page }) {
-    const brand = TOP_BRANDS[(page - 1) % TOP_BRANDS.length] ?? 'audi';
-    return `https://${brand}.autobazar.sk/`;
+    // `page` walks brands and their pages as one flat sequence: pages 1..25 are
+    // the first brand, 26..50 the second, and so on. 25 covers the largest
+    // brand (~21 pages); smaller ones repeat their last page, which upsert
+    // deduplicates.
+    const p = Math.max(1, page) - 1;
+    const brand = TOP_BRANDS[Math.floor(p / PAGES_PER_BRAND) % TOP_BRANDS.length] ?? 'audi';
+    const brandPage = (p % PAGES_PER_BRAND) + 1;
+    return brandPage === 1
+      ? `https://${brand}.autobazar.sk/`
+      : `https://${brand}.autobazar.sk/?p[page]=${brandPage}`;
   },
   parseListingsPage,
   detailUrl,
