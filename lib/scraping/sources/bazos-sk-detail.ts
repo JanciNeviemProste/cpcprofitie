@@ -21,6 +21,7 @@ import { PRICE_MAX, PRICE_MIN } from '@/lib/analytics/quality';
 import {
   extractEurFromText,
   extractFuelHintFromText,
+  extractYearFromText,
   extractTransmissionHintFromText,
   parseFuel,
   parseMakeModel,
@@ -55,12 +56,22 @@ export function parseDetailPage(html: string, listing: NormalizedListing): Norma
 
   const fullText = $('body').text();
 
-  const bodyType = extractAfterLabel(fullText, 'Karoséria');
-  const colorExterior = extractAfterLabel(fullText, 'Farba');
-  const vinRaw = extractAfterLabel(fullText, 'VIN');
+  // Bazoš renders a sidebar of related listings, so page-wide text carries
+  // OTHER cars' labels — the price parser below already guards against exactly
+  // that. Verified live: a Toyota whose own description says "r.v.: 01/2018"
+  // has a neighbour's "Rok výroby: 7/2021" elsewhere in the body, so a
+  // body-wide lookup silently wrote 2021 onto that car. Scope every label to
+  // this listing's own description block instead.
+  const $popis = $('.popisdetail').first();
+  const popisText = $popis.length > 0 ? $popis.text() : '';
+  const labelText = popisText.trim().length > 0 ? popisText : fullText;
+
+  const bodyType = extractAfterLabel(labelText, 'Karoséria');
+  const colorExterior = extractAfterLabel(labelText, 'Farba');
+  const vinRaw = extractAfterLabel(labelText, 'VIN');
   const vin = isPlausibleVin(vinRaw) ? vinRaw : null;
-  const powerKw = parseFirstInt(extractAfterLabel(fullText, 'Výkon'));
-  const engineCcm = parseFirstInt(extractAfterLabel(fullText, 'Objem'));
+  const powerKw = parseFirstInt(extractAfterLabel(labelText, 'Výkon'));
+  const engineCcm = parseFirstInt(extractAfterLabel(labelText, 'Objem'));
   // Bazoš mostly doesn't expose seller in a structured way — heuristic only.
   const sellerName: string | null = null;
   const sellerType: SellerType | null = /firma|s\.r\.o|spol\.\s*s\s*r\.\s*o\.|autobazar/i.test(
@@ -77,22 +88,19 @@ export function parseDetailPage(html: string, listing: NormalizedListing): Norma
   // Description: prefer the "popisdetail" container if present, else first
   // long <div> on the page.
   let description: string | null = null;
-  const $popis = $('.popisdetail').first();
   if ($popis.length > 0) {
     description = $popis.text().trim().slice(0, 4000);
   }
 
   // Detail page has more reliable meta than the list card. Extract overrides
   // so persistDetails can patch any NULL year/km/region/fuel on the listing.
-  const yearRaw = extractAfterLabel(fullText, 'Rok výroby');
-  const year = parseYearFromLabel(yearRaw);
-  const kmRaw = extractAfterLabel(fullText, 'Najazdené');
-  const mileageKm = parseFirstInt(kmRaw);
-  const fuelHint = extractAfterLabel(fullText, 'Palivo');
+  const year = extractYear(labelText, rawTitleForYear($));
+  const mileageKm = extractKm(labelText);
+  const fuelHint = extractAfterLabel(labelText, 'Palivo');
   const fuel = parseFuel(extractFuelHintFromText(fuelHint ?? ''));
-  const transHint = extractAfterLabel(fullText, 'Prevodovka');
+  const transHint = extractAfterLabel(labelText, 'Prevodovka');
   const transmission = parseTransmission(extractTransmissionHintFromText(transHint ?? ''));
-  const locRaw = extractAfterLabel(fullText, 'Lokalita');
+  const locRaw = extractAfterLabel(labelText, 'Lokalita');
   const region = prefixRegion(locRaw, 'SK');
 
   // Price: anchor to the listing's own `.inzeratycena` element — NEVER a bare
@@ -142,6 +150,50 @@ export function parseDetailPage(html: string, listing: NormalizedListing): Norma
     identity,
     listingOverrides: Object.keys(listingOverrides).length > 0 ? listingOverrides : undefined,
   };
+}
+
+// Only a minority of ads use Bazoš's own "Rok výroby:" field. Dealers write
+// their own header instead — "r.v.: 01/2018", "Prvá evidencia 11/2019",
+// "MODEL 2020" — which is why a single-label lookup found a year on roughly one
+// listing in eight. Registration wins over MODEL: the Ford sample carries both
+// "MODEL 2020" and "Prvá evidencia 11/2019", and 2019 is the real one.
+const YEAR_LABELS = ['Rok výroby', 'r.v.', 'Prvá evidencia', '1. evidencia', 'Rok', 'MODEL'];
+
+function rawTitleForYear($: cheerio.CheerioAPI): string | null {
+  return $('h1').first().text().trim() || null;
+}
+
+function extractYear(labelText: string, title: string | null): number | null {
+  for (const label of YEAR_LABELS) {
+    const y = parseYearFromLabel(extractAfterLabel(labelText, label));
+    if (y != null) return y;
+  }
+  // Titles often carry it: "Citroen C3 1.5 BlueHDi 75 kw - 2023 - odpočet DPH".
+  return extractYearFromText(title);
+}
+
+const KM_LABELS = ['Najazdené', 'Najazdených', 'Stav km', 'Tachometer', 'Najazd'];
+
+function extractKm(labelText: string): number | null {
+  for (const label of KM_LABELS) {
+    const km = parseKmValue(extractAfterLabel(labelText, label));
+    if (km != null) return km;
+  }
+  // Unlabelled odometers are common ("✅ 199 653 km"). Only accept a figure
+  // large enough to be one: this rules out "5.2 lit. /100 km" and the
+  // "188tis. KM" style service notes, which parse below the floor.
+  const m = /(\d[\d\s.,]{2,})\s*km\b/i.exec(labelText);
+  return m ? parseKmValue(m[1]!) : null;
+}
+
+/** Separators in an odometer are thousands marks, never decimals —
+ *  "203.336KM", "199 653 km" and "203,336" are all 203336 / 199653. */
+function parseKmValue(text: string | null): number | null {
+  if (!text) return null;
+  const m = /(\d[\d\s.,]*)/.exec(text);
+  if (!m) return null;
+  const n = Number(m[1]!.replace(/[\s.,]/g, ''));
+  return Number.isFinite(n) && n >= 1000 && n <= 2_000_000 ? n : null;
 }
 
 // "Rok výroby: 10/2018" → 2018. "Rok výroby: model 2020" → 2020.
