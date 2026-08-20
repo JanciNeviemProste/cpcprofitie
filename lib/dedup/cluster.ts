@@ -20,6 +20,8 @@ export type ClusterStats = {
   vinClonesAssigned: number;
   fingerprintClusters: number;
   fingerprintClonesAssigned: number;
+  /** Clones repointed from a mid-chain head to the real one. */
+  chainsFlattened: number;
 };
 
 /**
@@ -37,6 +39,7 @@ export async function clusterReposts(opts: {
     vinClonesAssigned: 0,
     fingerprintClusters: 0,
     fingerprintClonesAssigned: 0,
+    chainsFlattened: 0,
   };
 
   // ── Pass 1: VIN-based clustering ──
@@ -170,6 +173,50 @@ export async function clusterReposts(opts: {
     stats.fingerprintClusters = Number(fpRow.clusters);
     stats.fingerprintClonesAssigned = Number(fpRow.clones_assigned);
   }
+
+  // ── Pass 3: flatten chains ──
+  // A row clustered by fingerprint in an earlier run can later be pulled into a
+  // VIN cluster, leaving its own clones pointing at a row that is now itself a
+  // clone. Every consumer reads canonical_listing_id IS NULL as "this is the
+  // canonical row", so the middle of a chain is invisible: its clones are
+  // hidden behind a head that is itself hidden.
+  //
+  // Walking to the ultimate head rather than one hop up, because a chain can be
+  // longer than two — and stopping at the row's own id so a cycle, however it
+  // arose, terminates instead of spinning.
+  const flattened = await db.execute(sql`
+    WITH RECURSIVE resolved AS (
+      SELECT l.id, l.canonical_listing_id AS head, 1 AS depth
+      FROM ${listings} l
+      WHERE l.canonical_listing_id IS NOT NULL
+      UNION ALL
+      SELECT r.id, c.canonical_listing_id, r.depth + 1
+      FROM resolved r
+      JOIN ${listings} c ON c.id = r.head
+      WHERE c.canonical_listing_id IS NOT NULL
+        AND c.canonical_listing_id <> r.id
+        AND r.depth < 10
+    ),
+    deepest AS (
+      SELECT DISTINCT ON (id) id, head
+      FROM resolved
+      ORDER BY id, depth DESC
+    ),
+    updates AS (
+      UPDATE ${listings} l
+      SET canonical_listing_id = d.head
+      FROM deepest d
+      WHERE l.id = d.id
+        AND l.canonical_listing_id IS DISTINCT FROM d.head
+        AND d.head <> l.id
+      RETURNING l.id
+    )
+    SELECT (SELECT COUNT(*) FROM updates) AS repointed
+  `);
+  const flatRow = (flattened as unknown as Array<Record<string, unknown>>)[0] as
+    | { repointed: number | string }
+    | undefined;
+  stats.chainsFlattened = flatRow ? Number(flatRow.repointed) : 0;
 
   return stats;
 }

@@ -74,10 +74,26 @@ export async function unmergeFalseClusters(
         c.year AS canonical_year
       FROM listings l
       JOIN listings c ON c.id = l.canonical_listing_id
-      WHERE NOT (
-          l.fingerprint IS NOT NULL
-          AND c.fingerprint IS NOT NULL
-          AND l.fingerprint = c.fingerprint
+      WHERE (
+          NOT (
+            l.fingerprint IS NOT NULL
+            AND c.fingerprint IS NOT NULL
+            AND l.fingerprint = c.fingerprint
+          )
+          -- VIN outranks the fingerprint in both directions. A dealer listing
+          -- four identically specced new Octavias gives all four the same
+          -- fingerprint — same model, year, mileage bucket, seller — and they
+          -- are four separate cars. Three such clusters survived the first pass
+          -- because their hashes agreed.
+          OR EXISTS (
+            SELECT 1
+            FROM listing_details dl, listing_details dc
+            WHERE dl.listing_id = l.id
+              AND dc.listing_id = c.id
+              AND dl.vin IS NOT NULL AND LENGTH(dl.vin) = 17
+              AND dc.vin IS NOT NULL AND LENGTH(dc.vin) = 17
+              AND dl.vin <> dc.vin
+          )
         )
         AND NOT EXISTS (
           SELECT 1
