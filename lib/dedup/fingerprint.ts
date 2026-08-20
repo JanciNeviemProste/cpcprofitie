@@ -3,9 +3,14 @@
 // Without a stable fingerprint, each repost looks like a new car and skews
 // every demand metric we compute downstream.
 //
-// Strategy: SHA-256 over normalized identifying fields. Photo URL basename is
-// a stable proxy on autobazar.eu (their CDN paths don't change when the same
-// image is re-uploaded). Perceptual photo hashing is a v2 follow-up.
+// Strategy: SHA-256 over normalized identifying fields — but only when those
+// fields actually identify something. The hard-won lesson here is that "we have
+// a value" and "we have an identity" are different claims, and conflating them
+// merged 13 631 listings that had nothing in common beyond knowing nothing
+// about themselves. Both computeFingerprint and photoIdentity return null
+// rather than a value that would be shared by everything.
+//
+// Perceptual photo hashing is still the v2 that would make this robust.
 
 import { createHash } from 'node:crypto';
 
@@ -101,11 +106,33 @@ export function photoIdentity(
 ): string | null {
   const basename = extractPhotoBasename(url);
   if (basename === 'no-photo') return null;
+  if (PLACEHOLDER_BASENAMES.has(basename.toLowerCase())) return null;
   // Checked against the id rather than against a list of sources: a site that
   // changes its URL scheme should not need this file edited to stay correct.
   if (sourceId && basename.includes(sourceId)) return null;
   return `${source}:${basename}`;
 }
+
+/**
+ * Stand-in images served when an advert has no photo of its own.
+ *
+ * Found by measuring, not by guessing: on bazoš every photo path but one is
+ * built from the advert id, and the exception is
+ * https://www.bazos.sk/obrazky/empty.gif, served on 193 adverts. Left alone it
+ * would have handed all 193 the identity "bazos.sk:empty" and merged them into
+ * one car — the original bug in miniature, and a reminder that "has a photo"
+ * and "has a photo of this car" are different claims.
+ */
+const PLACEHOLDER_BASENAMES = new Set([
+  'empty',
+  'noimage',
+  'no-image',
+  'nophoto',
+  'no-photo',
+  'placeholder',
+  'default',
+  'blank',
+]);
 
 /** Floor mileage to the nearest 5 000 km. Sellers often re-list a car after
  *  a few hundred km of driving; flooring puts anything in [N×5k, (N+1)×5k)
@@ -119,13 +146,15 @@ const DIACRITIC_RE = /[̀-ͯ]/g;
 
 export function normalizeSeller(name: string | null | undefined): string {
   if (!name) return 'no-seller';
-  return name
-    .normalize('NFD')
-    .replace(DIACRITIC_RE, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 64) || 'no-seller';
+  return (
+    name
+      .normalize('NFD')
+      .replace(DIACRITIC_RE, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 64) || 'no-seller'
+  );
 }
 
 export function normalizeRegion(region: string | null | undefined): string {

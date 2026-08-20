@@ -158,6 +158,15 @@ describe('photoIdentity', () => {
     ).toBe('autobazar.eu:SdRpx7QTB_fss');
   });
 
+  it('ignores a stand-in image served when the advert has no photo', () => {
+    // The real one: 193 bazoš adverts share this gif. Treating it as identity
+    // would merge all 193 into one car — the original bug in miniature.
+    expect(
+      photoIdentity('bazos.sk', 'https://www.bazos.sk/obrazky/empty.gif', '194498950'),
+    ).toBeNull();
+    expect(photoIdentity('autobazar.eu', 'https://x/y/placeholder.png', '1')).toBeNull();
+  });
+
   it('is null when there is no photo at all', () => {
     expect(photoIdentity('autobazar.eu', null, '1')).toBeNull();
     expect(photoIdentity('autobazar.eu', 'not a url', '1')).toBeNull();
