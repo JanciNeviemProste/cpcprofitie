@@ -25,12 +25,40 @@ describe('computeSnapshot', () => {
 
   it('skips invalid prices but keeps the input row count', () => {
     const stats = computeSnapshot([
-      { priceEur: 10000, daysListed: 5 },
-      { priceEur: 0, daysListed: 7 },
-      { priceEur: 20000, daysListed: 3 },
+      { priceEur: 10000, daysListed: null },
+      { priceEur: 0, daysListed: null },
+      { priceEur: 20000, daysListed: null },
     ]);
     expect(stats.countActive).toBe(3);
     expect(stats.medianPriceEur).toBe(15000);
-    expect(stats.daysToSellAvg).toBe(5);
+  });
+
+  it('refuses to publish a days-to-sell from too few sales', () => {
+    // It used to publish from one. A single sold car set the headline
+    // "days to sell" for a whole cohort — and the sold set was itself 93%
+    // listings that were already gone the first time we fetched them.
+    const prices = [{ priceEur: 10000, daysListed: null }];
+    expect(computeSnapshot(prices, [5]).daysToSellAvg).toBeNull();
+    expect(computeSnapshot(prices, [5, 7, 3, 9]).daysToSellAvg).toBeNull();
+    expect(computeSnapshot(prices, [5, 7, 3, 9, 11]).daysToSellAvg).toBe(7);
+  });
+
+  it('takes the median of sold lifetimes, not the mean', () => {
+    // Time-to-sell is heavily skewed. One car that sat for 300 days drags a
+    // mean somewhere no actual car has ever been.
+    const prices = [{ priceEur: 10000, daysListed: null }];
+    expect(computeSnapshot(prices, [3, 4, 5, 6, 300]).daysToSellAvg).toBe(5);
+  });
+
+  it('keeps prices and sold lifetimes apart', () => {
+    // They were once zipped by position, pairing the n-th active price with
+    // the n-th sale and truncating to the shorter list. The two have nothing
+    // to do with each other: one is cars on sale, the other is cars that left.
+    const stats = computeSnapshot(
+      [{ priceEur: 10000, daysListed: null }],
+      [10, 20, 30, 40, 50],
+    );
+    expect(stats.countActive).toBe(1);
+    expect(stats.daysToSellAvg).toBe(30);
   });
 });

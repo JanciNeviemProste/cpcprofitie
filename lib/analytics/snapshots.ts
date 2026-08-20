@@ -86,9 +86,15 @@ export async function computeWeeklySnapshots(
       ) AS active_prices,
       COUNT(*) FILTER (WHERE l.sold_at IS NOT NULL AND l.sold_at >= ${sql.raw(weekStartLit)}) AS sold_this_week,
       ARRAY_AGG(
-        (EXTRACT(EPOCH FROM (coalesce(l.sold_at, l.removed_at) - l.first_seen_at)) / 86400.0)::float8
+        -- From when we first had evidence the advert existed, not from when we
+        -- imported the URL. first_seen_at is our discovery date: 87 648 of
+        -- 87 917 rows were imported from a corpus that already existed, so a
+        -- lifetime measured from it is bounded by how long we have been looking.
+        (EXTRACT(EPOCH FROM (coalesce(l.sold_at, l.removed_at) - l.first_seen_alive_at)) / 86400.0)::float8
       ) FILTER (
-        WHERE l.sold_at IS NOT NULL AND l.sold_at >= ${sql.raw(weekStartLit)}
+        WHERE l.sold_at IS NOT NULL
+          AND l.first_seen_alive_at IS NOT NULL
+          AND l.sold_at >= ${sql.raw(weekStartLit)}
       ) AS sold_days_listed
     FROM listings l
     WHERE l.model_id IS NOT NULL
@@ -130,12 +136,11 @@ export async function computeWeeklySnapshots(
     if (prices.length < minCohortSize) continue;
     modelsSeen.add(row.model_id);
 
+    // Passed separately, not zipped. Pairing the n-th active price with the
+    // n-th sale matched two unrelated lists and truncated to the shorter one.
     const daysListed = toNumberArray(row.sold_days_listed).filter((d) => d >= 0);
-    const inputs: SnapshotInput[] = prices.map((priceEur, i) => ({
-      priceEur,
-      daysListed: daysListed[i] ?? null,
-    }));
-    const stats = computeSnapshot(inputs);
+    const inputs: SnapshotInput[] = prices.map((priceEur) => ({ priceEur, daysListed: null }));
+    const stats = computeSnapshot(inputs, daysListed);
     const soldThisWeek = Number(row.sold_this_week);
 
     valuesToUpsert.push({

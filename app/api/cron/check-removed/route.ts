@@ -112,7 +112,14 @@ async function run(request: Request): Promise<NextResponse> {
         await dbCall(
           () =>
             db.execute(sql`
-              UPDATE listings SET last_seen_at = now() WHERE id = ${toBigInt(row.id)}
+              UPDATE listings
+              SET last_seen_at = now(),
+                  -- A 2xx on the listing's own URL is direct evidence it is
+                  -- still there. Without this, a listing only ever checked by
+                  -- this sweep would look "never observed alive" and its
+                  -- eventual disappearance could not be read as a sale.
+                  first_seen_alive_at = coalesce(first_seen_alive_at, now())
+              WHERE id = ${toBigInt(row.id)}
             `),
           { step: 'check-removed.markLive' },
         );

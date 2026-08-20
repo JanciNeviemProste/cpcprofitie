@@ -14,11 +14,13 @@ function fmtCount(n: number | null): string {
   return n.toLocaleString('sk-SK');
 }
 
-function fmtDays(d: number | null): string {
-  if (d == null) return '—';
-  return `${Math.round(d)}${NBSP}dní`;
-}
-
+// "Predané (7d)" and "Days-to-sell" used to live here. They are gone rather
+// than blanked, because the numbers behind them were not measurements: 93% of
+// recorded sales were listings already dead the first time we fetched them, and
+// even the genuine ones are left-censored — first_seen_at is when we started
+// looking, not when the advert appeared, and 87 648 of 87 917 rows predate our
+// corpus. A column of dashes would still promise that the metric exists and is
+// merely sparse. They come back when there are sales we watched happen.
 export function TrendsTable({ rows }: { rows: TrendRow[] }) {
   if (rows.length === 0) {
     return (
@@ -37,10 +39,8 @@ export function TrendsTable({ rows }: { rows: TrendRow[] }) {
             <th className="px-4 py-3 text-left font-medium">Model</th>
             <th className="px-4 py-3 text-right font-medium">Aktívne</th>
             <th className="px-4 py-3 text-right font-medium">WoW</th>
-            <th className="px-4 py-3 text-right font-medium">Predané (7d)</th>
             <th className="px-4 py-3 text-right font-medium">Medián ceny</th>
             <th className="px-4 py-3 text-right font-medium">Δ cena</th>
-            <th className="px-4 py-3 text-right font-medium">Days-to-sell</th>
           </tr>
         </thead>
         <tbody>
@@ -62,16 +62,10 @@ export function TrendsTable({ rows }: { rows: TrendRow[] }) {
                 <WowArrow current={r.countActive} previous={r.countActiveLastWeek} />
               </td>
               <td className="px-4 py-3 text-right tabular-nums">
-                {fmtCount(r.countSoldThisWeek)}
-              </td>
-              <td className="px-4 py-3 text-right tabular-nums">
                 {fmtPrice(r.medianPriceEur)}
               </td>
               <td className="px-4 py-3 text-right">
                 <WowArrow current={r.medianPriceEur} previous={r.medianLastWeekEur} invert />
-              </td>
-              <td className="px-4 py-3 text-right tabular-nums">
-                {fmtDays(r.daysToSellAvg)}
               </td>
             </tr>
           ))}

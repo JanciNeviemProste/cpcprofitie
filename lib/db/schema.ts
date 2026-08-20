@@ -144,6 +144,11 @@ export const listings = pgTable(
     // check-removed stamps that after a HEAD request, which reads no price, so
     // it reports freshness a stale price does not have. See 0012.
     priceCheckedAt: timestamp('price_checked_at', { withTimezone: true }),
+    // When we last had evidence the listing really existed — a detail page that
+    // parsed, or seeing it again on a list page. NOT first_seen_at, which is
+    // only when we imported the URL: 4 205 "sales" were listings already dead
+    // the first time we looked. See 0013_observed_alive.sql.
+    firstSeenAliveAt: timestamp('first_seen_alive_at', { withTimezone: true }),
   },
   (t) => [
     uniqueIndex('listings_source_source_id_idx').on(t.source, t.sourceId),

@@ -97,6 +97,7 @@ export async function computeFlipOpportunities(): Promise<FlipComputeStats> {
         AND l.model_id IS NOT NULL
         AND l.year IS NOT NULL
         AND l.mileage_km IS NOT NULL
+        AND l.is_vehicle = true
         AND ${plausiblePricedRaw('l')}
     ),
     cohort_pool AS (
@@ -116,6 +117,7 @@ export async function computeFlipOpportunities(): Promise<FlipComputeStats> {
         AND l.model_id IS NOT NULL
         AND l.year IS NOT NULL
         AND l.mileage_km IS NOT NULL
+        AND l.is_vehicle = true
         AND ${plausiblePricedRaw('l')}
     ),
     cohort_agg AS (

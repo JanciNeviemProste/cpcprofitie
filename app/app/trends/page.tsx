@@ -4,7 +4,10 @@ import { getTrendingModels, type TrendsSort } from '@/lib/db/queries/trends';
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Trendy modelov · CPCProfit' };
 
-const VALID_SORTS: TrendsSort[] = ['demand', 'movement', 'price-drop'];
+// 'movement' ranked models by sales we did not observe, so it ordered by a
+// column that is now almost entirely zero. A sort with nothing to sort by is
+// not degraded, it is broken — better absent until the sales are real.
+const VALID_SORTS: TrendsSort[] = ['demand', 'price-drop'];
 
 function parseSort(v: string | undefined): TrendsSort {
   if (v && (VALID_SORTS as string[]).includes(v)) return v as TrendsSort;
@@ -13,7 +16,6 @@ function parseSort(v: string | undefined): TrendsSort {
 
 const SORT_LABELS: Record<TrendsSort, string> = {
   demand: 'Podľa dopytu',
-  movement: 'Najpredávanejšie',
   'price-drop': 'Najväčší pokles ceny',
 };
 

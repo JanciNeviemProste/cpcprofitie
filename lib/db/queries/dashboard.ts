@@ -52,6 +52,11 @@ async function getTrendingModelsUnsafe(limit: number): Promise<TrendingItem[]> {
         sql`${listings.canonicalListingId} IS NULL`,
         sql`${listings.removedAt} IS NULL`,
         sql`${listings.soldAt} IS NULL`,
+        // A bumper sold under "Škoda Octavia" is filed as an Octavia. This
+        // guard existed in exactly one query in the product — the weekly
+        // snapshot — and was missing from every surface a visitor actually
+        // reads.
+        sql`${listings.isVehicle} = true`,
         // Keep implausible prices/mileage out of the median.
         plausibleListing({
           priceEur: listings.priceEur,
@@ -166,6 +171,9 @@ async function getModelKpiUnsafe(slug: string): Promise<ModelKpi | null> {
         sql`${listings.canonicalListingId} IS NULL`,
         sql`${listings.removedAt} IS NULL`,
         sql`${listings.soldAt} IS NULL`,
+        // Same reason as getTrendingModelsUnsafe above: parts carry a brand and
+        // model, so without this they price the model they were taken off.
+        sql`${listings.isVehicle} = true`,
         plausibleListing({
           priceEur: listings.priceEur,
           mileageKm: listings.mileageKm,

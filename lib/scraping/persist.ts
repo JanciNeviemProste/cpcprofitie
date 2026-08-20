@@ -346,6 +346,12 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
             // last_seen_at cannot serve this purpose: check-removed bumps it
             // after a HEAD request, which reads no price at all.
             priceCheckedAt: sql`now()`,
+            // Evidence the advert really exists. Only in the UPDATE branch,
+            // never in the insert: a first sighting can come from a stale
+            // index, and 4 000+ of our "sales" were listings that were already
+            // dead the first time we looked. Seeing it AGAIN, later, is the
+            // proof. coalesce so the first such sighting is the one kept.
+            firstSeenAliveAt: sql`coalesce(${listings.firstSeenAliveAt}, now())`,
             // Don't clobber a stronger fingerprint (computed post-enrichment)
             // with the weaker upsert-time one. Only set it when NULL.
             fingerprint: sql`coalesce(${listings.fingerprint}, excluded.fingerprint)`,
@@ -609,6 +615,13 @@ export async function persistDetails(details: NormalizedDetail[]): Promise<Detai
     }
 
     try {
+      // A detail page that parsed is the strongest evidence we have that the
+      // advert exists. Stamped before the detail upsert so a failure there
+      // still leaves the liveness fact recorded — it is true either way.
+      await db.execute(sql`
+        UPDATE listings SET first_seen_alive_at = coalesce(first_seen_alive_at, now())
+        WHERE id = ${listingId}
+      `);
       await db
         .insert(listingDetails)
         .values({

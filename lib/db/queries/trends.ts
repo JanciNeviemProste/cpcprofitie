@@ -3,6 +3,7 @@
 import * as Sentry from '@sentry/nextjs';
 import { sql } from 'drizzle-orm';
 import { getDb } from '../index';
+import { plausiblePricedRaw } from '@/lib/analytics/quality';
 
 export type TrendRow = {
   modelId: number;
@@ -36,7 +37,19 @@ export type DealRow = {
   heroPhotoUrl: string | null;
 };
 
-export type TrendsSort = 'demand' | 'movement' | 'price-drop';
+/**
+ * Cars needed before a model-level median is worth showing.
+ *
+ * 1 351 of 2 250 models have fewer than five priced listings. Publishing a
+ * "median" for those was publishing one car's asking price under a word that
+ * promises a market.
+ */
+export const MIN_MODELS_FOR_MEDIAN = 5;
+
+// 'movement' (rank by sales) is gone: 93% of recorded sales were listings
+// already dead the first time we fetched them, so it ordered by a column that
+// is now almost entirely zero.
+export type TrendsSort = 'demand' | 'price-drop';
 
 /**
  * Top N models by demand metric. Joins this-week and last-week snapshots so
@@ -71,11 +84,22 @@ async function getTrendingModelsUnsafe(opts: {
         model_id,
         SUM(count_active) AS count_active,
         SUM(count_sold) AS count_sold,
-        AVG(median_price_eur::float8) AS median_price,
+        -- Weighted by cohort size. A flat AVG gave a model's 40-car bucket and
+        -- its 3-car bucket equal say, so the published "median" moved when the
+        -- mix of buckets changed rather than when prices did.
+        (SUM(median_price_eur::float8 * count_active) / NULLIF(SUM(count_active), 0))
+          AS median_price,
         AVG(days_to_sell_avg::float8) AS days_to_sell
       FROM market_snapshots
       WHERE period = 'week'
         AND captured_on = (SELECT MAX(captured_on) FROM market_snapshots WHERE period = 'week')
+        -- Filtered on read, not on write. A snapshot is a measurement of a
+        -- past week and cannot be recomputed once those listings have moved,
+        -- so raising the write floor would destroy rows permanently and still
+        -- leave every row already published in place. Filtering here is
+        -- reversible, applies to the whole history at once, and can be tuned
+        -- without another week of data.
+        AND count_active >= ${MIN_MODELS_FOR_MEDIAN}
       GROUP BY model_id
     ),
     last_week AS (
@@ -93,17 +117,28 @@ async function getTrendingModelsUnsafe(opts: {
       GROUP BY model_id
     ),
     -- Fallback for first deploy: count live canonical listings directly.
+    -- Used for models with no snapshot yet — two thirds of them. It was an
+    -- AVG with no plausibility bound, no parts filter and no minimum count,
+    -- coalesced into the same column the UI labels "Medián ceny". So most of
+    -- the page showed an unfiltered mean of one to four rows, called a median.
     live_fallback AS (
       SELECT
         l.model_id,
-        COUNT(*) FILTER (WHERE l.sold_at IS NULL AND l.removed_at IS NULL) AS count_active,
+        COUNT(*) AS count_active,
         0::bigint AS count_sold,
-        AVG(l.price_eur::float8) FILTER (WHERE l.sold_at IS NULL AND l.removed_at IS NULL) AS median_price,
+        percentile_cont(0.5) WITHIN GROUP (ORDER BY l.price_eur::float8) AS median_price,
         NULL::float8 AS days_to_sell
       FROM listings l
       WHERE l.model_id IS NOT NULL
         AND l.canonical_listing_id IS NULL
+        AND l.sold_at IS NULL
+        AND l.removed_at IS NULL
+        AND l.is_vehicle = true
+        AND ${plausiblePricedRaw('l')}
       GROUP BY l.model_id
+      -- Below this there is no market to speak of; the UI shows nothing rather
+      -- than a number nobody could defend.
+      HAVING COUNT(*) >= ${MIN_MODELS_FOR_MEDIAN}
     )
     SELECT
       vm.id AS model_id,
@@ -124,7 +159,6 @@ async function getTrendingModelsUnsafe(opts: {
     WHERE coalesce(tw.count_active, lf.count_active, 0) > 0
     ORDER BY
       CASE WHEN ${sort} = 'demand' THEN coalesce(tw.count_active, lf.count_active, 0) END DESC NULLS LAST,
-      CASE WHEN ${sort} = 'movement' THEN coalesce(tw.count_sold, 0) END DESC NULLS LAST,
       CASE WHEN ${sort} = 'price-drop'
         THEN (lw.median_price - coalesce(tw.median_price, lf.median_price))
       END DESC NULLS LAST

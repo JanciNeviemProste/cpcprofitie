@@ -65,6 +65,12 @@ export async function detectSoldListings(
           -- ever, and since the cursor restarts at 0 each time, the scan would
           -- eventually stop reaching genuinely new removals.
           AND fingerprint IS NOT NULL
+          -- A car we never observed alive cannot have been observed to sell.
+          -- 3 910 of our 4 223 "sales" were listings that were already gone the
+          -- first time we fetched them: we imported a URL, the detail page 404'd,
+          -- removed_at was set, and this function read that as a sale — average
+          -- lifetime 0.21 days. They were never on the market as far as we saw.
+          AND first_seen_alive_at IS NOT NULL
           AND id > ${cursor.toString()}::bigint
         ORDER BY id ASC
         LIMIT ${batchSize}
@@ -108,6 +114,7 @@ export async function detectSoldListings(
           AND l.sold_at IS NULL
           AND l.removed_at IS NOT NULL
           AND l.fingerprint IS NOT NULL
+          AND l.first_seen_alive_at IS NOT NULL
           AND NOT EXISTS (
             SELECT 1
             FROM ${listings} r
