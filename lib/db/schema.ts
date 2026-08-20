@@ -136,6 +136,10 @@ export const listings = pgTable(
     viewCount: integer('view_count'),
     isFeatured: boolean('is_featured').notNull().default(false),
     sellerPhone: varchar('seller_phone', { length: 32 }),
+    // False for a part sold under a car's brand and model — see 0011_is_vehicle.sql.
+    // Defaults true: unclassified means car, because dropping a real car from the
+    // market costs far more than leaving one bumper in a cohort.
+    isVehicle: boolean('is_vehicle').notNull().default(true),
   },
   (t) => [
     uniqueIndex('listings_source_source_id_idx').on(t.source, t.sourceId),
