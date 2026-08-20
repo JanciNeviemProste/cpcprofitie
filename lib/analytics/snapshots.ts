@@ -65,15 +65,15 @@ export async function computeWeeklySnapshots(
   const rows = (await db.execute(sql`
     SELECT
       l.model_id,
+      -- No 'unknown' branch in either CASE: the WHERE clause below has already
+      -- excluded every row that would land in one.
       CASE
-        WHEN l.year IS NULL THEN 'unknown'
         WHEN l.year >= 2020 THEN '2020+'
         WHEN l.year >= 2015 THEN '2015-19'
         WHEN l.year >= 2010 THEN '2010-14'
         ELSE '<2010'
       END AS year_bucket,
       CASE
-        WHEN l.mileage_km IS NULL OR l.mileage_km < 0 THEN 'unknown'
         WHEN l.mileage_km < 50000 THEN '0-50k'
         WHEN l.mileage_km < 100000 THEN '50-100k'
         WHEN l.mileage_km < 150000 THEN '100-150k'
@@ -93,6 +93,19 @@ export async function computeWeeklySnapshots(
     FROM listings l
     WHERE l.model_id IS NOT NULL
       AND l.canonical_listing_id IS NULL
+      -- Parts carry a brand and model in their title, so the catalog files a
+      -- bumper as an Octavia. They never reach DealScore, which needs a year
+      -- and a mileage, but they reach here: a EUR 100 door joins a cohort and
+      -- moves its median.
+      AND l.is_vehicle = true
+      -- A car with no year or no mileage cannot be compared to anything. The
+      -- CASEs above bucket both as 'unknown', which quietly gathers a 1998
+      -- hatchback and a 2024 estate into one cohort and calls their midpoint a
+      -- market price. Dropping them costs coverage and buys a median that
+      -- means what it says.
+      AND l.year IS NOT NULL
+      AND l.mileage_km IS NOT NULL
+      AND l.mileage_km >= 0
     GROUP BY 1, 2, 3
     HAVING COUNT(*) FILTER (
       WHERE l.sold_at IS NULL
