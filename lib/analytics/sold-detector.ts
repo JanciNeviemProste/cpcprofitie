@@ -58,6 +58,13 @@ export async function detectSoldListings(
         WHERE removed_at IS NOT NULL
           AND sold_at IS NULL
           AND canonical_listing_id IS NULL
+          -- No fingerprint means we cannot tell a sale from a repost, so there
+          -- is no verdict to reach. Filtered here rather than in the UPDATE on
+          -- purpose: these rows never get a verdict, so if they stayed in the
+          -- candidate set they would consume the batch budget on every run for
+          -- ever, and since the cursor restarts at 0 each time, the scan would
+          -- eventually stop reaching genuinely new removals.
+          AND fingerprint IS NOT NULL
           AND id > ${cursor.toString()}::bigint
         ORDER BY id ASC
         LIMIT ${batchSize}
@@ -83,9 +90,16 @@ export async function detectSoldListings(
     });
 
     // One set-based UPDATE per batch (was: SELECT + UPDATE per row, up to
-    // ~20k queries/run). "Sold" = no relisting with the same fingerprint +
-    // source within 30 days after removal; no fingerprint = can't prove a
-    // relisting, treat as sold.
+    // ~20k queries/run). "Sold" = no relisting with the same fingerprint and
+    // source within 30 days either side of removal.
+    //
+    // Either side, not just after. check-removed walks one seventh of the
+    // corpus a day, so removed_at can lag the real removal by up to a week —
+    // a seller who deletes and immediately relists produces a repost whose
+    // first_seen_at is *earlier* than removed_at. Looking only forwards missed
+    // it and called the car sold. Suppressing is the safe direction: a missed
+    // sale costs one data point, an invented one corrupts days-to-sell for
+    // good, and sold_at is never cleared.
     try {
       const marked = await db.execute(sql`
         UPDATE ${listings} l
@@ -93,17 +107,18 @@ export async function detectSoldListings(
         WHERE l.id IN (${sql.join(idFragments, sql`, `)})
           AND l.sold_at IS NULL
           AND l.removed_at IS NOT NULL
-          AND (
-            l.fingerprint IS NULL
-            OR NOT EXISTS (
-              SELECT 1
-              FROM ${listings} r
-              WHERE r.fingerprint = l.fingerprint
-                AND r.id <> l.id
-                AND r.source = l.source
-                AND r.first_seen_at BETWEEN l.removed_at
-                  AND (l.removed_at + interval '30 days')
-            )
+          AND l.fingerprint IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM ${listings} r
+            WHERE r.fingerprint = l.fingerprint
+              AND r.id <> l.id
+              AND r.source = l.source
+              -- A repost is always newer than what it reposts; without this a
+              -- listing's own predecessor would count as its successor.
+              AND r.first_seen_at > l.first_seen_at
+              AND r.first_seen_at BETWEEN (l.removed_at - interval '30 days')
+                AND (l.removed_at + interval '30 days')
           )
         RETURNING l.id
       `);
@@ -125,6 +140,18 @@ export async function detectSoldListings(
     );
 
     if (rows.length < batchSize) break;
+  }
+
+  // Running out of batches is not the same as finishing, and the two look
+  // identical from the outside: both return a tidy stats object. If the corpus
+  // of removed-but-undecided listings outgrows the per-run budget, the tail of
+  // it silently stops being examined, and nothing anywhere says so.
+  if (stats.scanned >= batchSize * maxBatches) {
+    Sentry.captureMessage('sold-detector exhausted its batch budget; removals went unexamined', {
+      level: 'warning',
+      tags: { component: 'sold-detector' },
+      extra: { scanned: stats.scanned, batchSize, maxBatches },
+    });
   }
 
   return stats;

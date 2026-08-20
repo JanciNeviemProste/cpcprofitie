@@ -263,10 +263,18 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
   const resolved = rows.map((r) => {
     if (!r.sourceId || !r.url) return null;
     const modelId = (r.modelSlug ? modelIds.get(r.modelSlug) : null) ?? null;
-    // Compute a weak fingerprint at upsert time using only listing-page
-    // fields. After detail enrichment runs, backfillFingerprints() will
-    // recompute with sellerName + first photo URL for stronger matching.
+    // A listing page carries no seller name and no photo we can attribute to
+    // the car, so this is the weakest form of the fingerprint. It is null far
+    // more often than not, and that is the point: computeFingerprint refuses
+    // to hash a listing that cannot be told apart from another car of the same
+    // model, rather than handing back a value they would all share.
+    //
+    // refreshFingerprints() recomputes from the enriched row later, where a
+    // seller name and a real photo identity may exist. Nothing here needs to
+    // guess ahead of that.
     const fingerprint = computeFingerprint({
+      source: r.source,
+      sourceId: r.sourceId,
       makeSlug: r.makeSlug,
       modelSlug: r.modelSlug,
       year: r.year,
