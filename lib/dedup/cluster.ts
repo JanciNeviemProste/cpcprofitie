@@ -20,7 +20,7 @@ export type ClusterStats = {
   vinClonesAssigned: number;
   fingerprintClusters: number;
   fingerprintClonesAssigned: number;
-  /** Clones repointed from a mid-chain head to the real one. */
+  /** Clones freed because their canonical was itself a clone. */
   chainsFlattened: number;
 };
 
@@ -181,34 +181,23 @@ export async function clusterReposts(opts: {
   // canonical row", so the middle of a chain is invisible: its clones are
   // hidden behind a head that is itself hidden.
   //
-  // Walking to the ultimate head rather than one hop up, because a chain can be
-  // longer than two — and stopping at the row's own id so a cycle, however it
-  // arose, terminates instead of spinning.
+  // It breaks the chain by freeing the clone, not by repointing it further up.
+  // Repointing was the first attempt and it was wrong: it moved VIN-backed
+  // clones onto a head with a different VIN, unmergeFalseClusters correctly
+  // cleared them, pass 1 re-merged them by VIN, and the two passes traded the
+  // same 35 rows back and forth for ever. Walking a chain is not evidence that
+  // its ends belong together — only that something in the middle was wrong.
+  //
+  // Freeing is the safe direction: the row becomes canonical, and the next run
+  // re-merges it on its own evidence. Under-merging costs a duplicate in the
+  // market; inventing a merge hides a real car.
   const flattened = await db.execute(sql`
-    WITH RECURSIVE resolved AS (
-      SELECT l.id, l.canonical_listing_id AS head, 1 AS depth
-      FROM ${listings} l
-      WHERE l.canonical_listing_id IS NOT NULL
-      UNION ALL
-      SELECT r.id, c.canonical_listing_id, r.depth + 1
-      FROM resolved r
-      JOIN ${listings} c ON c.id = r.head
-      WHERE c.canonical_listing_id IS NOT NULL
-        AND c.canonical_listing_id <> r.id
-        AND r.depth < 10
-    ),
-    deepest AS (
-      SELECT DISTINCT ON (id) id, head
-      FROM resolved
-      ORDER BY id, depth DESC
-    ),
-    updates AS (
+    WITH updates AS (
       UPDATE ${listings} l
-      SET canonical_listing_id = d.head
-      FROM deepest d
-      WHERE l.id = d.id
-        AND l.canonical_listing_id IS DISTINCT FROM d.head
-        AND d.head <> l.id
+      SET canonical_listing_id = NULL
+      FROM ${listings} c
+      WHERE c.id = l.canonical_listing_id
+        AND c.canonical_listing_id IS NOT NULL
       RETURNING l.id
     )
     SELECT (SELECT COUNT(*) FROM updates) AS repointed
