@@ -213,18 +213,64 @@ function extractYear(labelText: string, title: string | null): number | null {
   return extractYearFromText(title);
 }
 
-const KM_LABELS = ['Najazdené', 'Najazdených', 'Stav km', 'Tachometer', 'Najazd'];
+// Labels as patterns, for the same reason as YEAR_LABEL_PATTERNS: sellers write
+// the odometer every way there is. "Najazdené: 199 653", "KM:130904",
+// "Km 176000", "✅️km: 112000". A bare "km" label needs a word boundary or it
+// matches inside ordinary words.
+const KM_LABEL_PATTERNS = [
+  'Najazden[eé]ho',
+  'Najazden[éeé]',
+  'Najazden[ýy]ch',
+  'Stav km',
+  'Tachometer',
+  'Najazd',
+  '\\bkm',
+  '\\bKM',
+];
 
 function extractKm(labelText: string): number | null {
-  for (const label of KM_LABELS) {
-    const km = parseKmValue(extractAfterLabel(labelText, label));
+  for (const pattern of KM_LABEL_PATTERNS) {
+    const km = parseKmValue(extractAfterPattern(labelText, pattern));
     if (km != null) return km;
   }
-  // Unlabelled odometers are common ("✅ 199 653 km"). Only accept a figure
-  // large enough to be one: this rules out "5.2 lit. /100 km" and the
-  // "188tis. KM" style service notes, which parse below the floor.
-  const m = /(\d[\d\s.,]{2,})\s*km\b/i.exec(labelText);
-  return m ? parseKmValue(m[1]!) : null;
+
+  // Unlabelled odometers are common ("✅ 199 653 km").
+  //
+  // Every match is tried, not just the first, and each is trimmed from the
+  // left before giving up: "MOD. ROK 2015 182 700 KM" captures the year into
+  // the digit run and reads as 2 015 182 700, which is out of range. Dropping
+  // leading groups until the remainder is plausible recovers 182 700 — and the
+  // range check is what keeps that from being a licence to invent.
+  const re = /(\d[\d\s.,]{2,})\s*km\b/gi;
+  for (const m of labelText.matchAll(re)) {
+    const groups = m[1]!.trim().split(/[\s.,]+/).filter(Boolean);
+    for (let i = 0; i < groups.length; i++) {
+      const km = parseKmValue(groups.slice(i).join(''));
+      if (km != null) return km;
+    }
+  }
+
+  // The thousands shorthand last, so a plainly written odometer always wins.
+  // The existing fixture has both: "203.336KM" is the car's mileage and
+  // "188tis. KM" is a service note further down the same description. Reading
+  // this first would take the service note.
+  //
+  // "km" must follow, or "cena 15 tis €" reads as an odometer.
+  const tis = /(\d{1,4})\s*tis[a-z]*\.?\s*km/i.exec(labelText);
+  if (tis) {
+    const n = Number(tis[1]) * 1000;
+    if (n >= 1000 && n <= 2_000_000) return n;
+  }
+
+  return null;
+}
+
+/**
+ * Mileage from text already in the database rather than freshly fetched HTML.
+ * Same rules as the live path, so a backfill and a scrape agree.
+ */
+export function extractKmFromStoredText(description: string | null): number | null {
+  return extractKm(description ?? '');
 }
 
 /** Separators in an odometer are thousands marks, never decimals —

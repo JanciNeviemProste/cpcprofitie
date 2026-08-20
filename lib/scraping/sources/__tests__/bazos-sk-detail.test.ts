@@ -289,3 +289,39 @@ describe('bazos.sk detail — "r.v." spelled every way there is', () => {
     expect(parse('rezervné koleso, výbava 2000 W audio')).toBeUndefined();
   });
 });
+
+// Every string below is copied from a real bazoš advert whose mileage the
+// parser could not read, leaving 2 658 cars out of the market reference.
+describe('bazos.sk detail — the mileage formats sellers actually write', () => {
+  function parse(text: string) {
+    const html = `<html><body><div class="popisdetail">${text}</div></body></html>`;
+    return parseDetailPage(html, stub('1', 'https://auto.bazos.sk/inzerat/1/x.php'))
+      .listingOverrides?.mileageKm;
+  }
+
+  it('reads the thousands shorthand', () => {
+    expect(parse('Rok vyroby 2016 Najazdenych 116 tis km - zmluvne garantované')).toBe(116000);
+    expect(parse('rv. 05/2014, najazdené 225tis. km')).toBe(225000);
+    expect(parse('Rok vyroby - 2018 Najazdenych - 42 tisic km')).toBe(42000);
+  });
+
+  it('does not read a price in thousands as an odometer', () => {
+    // "km" has to follow. Without that guard this is 15 000 km.
+    expect(parse('Predám auto, cena 15 tis €, dohoda možná')).toBeUndefined();
+  });
+
+  it('reads a km label written without spacing', () => {
+    expect(parse('Vymena/Predaj RV:2/2018 KW:140 KM:130904 ABS, Airbagy')).toBe(130904);
+    expect(parse('Km 176000km Tažne, koženy interier')).toBe(176000);
+    expect(parse('✅️km: 112000 ✅️r.v: 2023/2')).toBe(112000);
+  });
+
+  it('still reads the plain and labelled forms', () => {
+    expect(parse('MOD. ROK 2015 182 700 KM 147 KW')).toBe(182700);
+    expect(parse('Najazdené: 169 676 km')).toBe(169676);
+  });
+
+  it('does not mistake fuel consumption for an odometer', () => {
+    expect(parse('Vyborna spotreba cca 5.2 lit. /100 km')).toBeUndefined();
+  });
+});

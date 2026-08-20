@@ -1,43 +1,42 @@
-// Repeatable backfill: recover `year` from detail descriptions already stored.
+// Repeatable backfill: recover mileage from detail descriptions already stored.
 //
-// Bazoš mostly writes the year two digits — "r.v.: 12/22" — and the detail
-// parser only understood four, so 4 779 cars ended up with no year. DealScore
-// needs a year, so every one of them sat outside every cohort.
+// Same shape as backfill-year, and the same reason: the bazoš detail page
+// carries the odometer while the list page carries a truncated snippet, so
+// thousands of cars sit outside every cohort for want of a number that is
+// already in the database. No crawling — this re-reads stored text.
 //
-// The descriptions are already in listing_details, so this needs no crawling at
-// all: it re-runs the (now fixed) extraction over stored text. Same shape as
-// backfill-model-id — bounded per call, cursor-driven, fills NULLs only and
-// never overwrites a year that is already there.
+// The formats the parser had to learn: "116 tis km", "225tis. km",
+// "KM:130904", "Km 176000", "182 700 KM". It knew one of them.
 
 import * as Sentry from '@sentry/nextjs';
 import { sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
-import { extractYearFromStoredText } from '@/lib/scraping/sources/bazos-sk-detail';
+import { extractKmFromStoredText } from '@/lib/scraping/sources/bazos-sk-detail';
 
-export type BackfillYearStats = {
+export type BackfillMileageStats = {
   scanned: number;
   resolved: number;
   updated: number;
   remaining: number;
   dryRun: boolean;
   /** Only on a dry run: what the extractor read, and the text it read it from.
-   *  A year is written once and never revisited, so a format misread quietly
-   *  files thousands of cars under the wrong decade — this makes the result
+   *  A mileage is written once and never revisited, so a format misread quietly
+   *  files thousands of cars in the wrong band — this makes the result
    *  checkable before anything is committed. */
-  sample?: Array<{ id: string; title: string | null; year: number; snippet: string }>;
+  sample?: Array<{ id: string; title: string | null; km: number; snippet: string }>;
   /** Highest id scanned this call. Pass back as `afterId` to continue — rows
-   *  whose text carries no year stay NULL and would otherwise be re-scanned
+   *  whose text carries no odometer stay NULL and would otherwise be re-scanned
    *  from the top forever (remaining never reaches 0). */
   nextCursor: string | null;
 };
 
-export async function backfillYear(
+export async function backfillMileage(
   opts: { limit?: number; dryRun?: boolean; afterId?: bigint } = {},
-): Promise<BackfillYearStats> {
+): Promise<BackfillMileageStats> {
   const limit = Math.min(10_000, Math.max(1, opts.limit ?? 5000));
   const dryRun = opts.dryRun ?? false;
   const db = getDb();
-  const stats: BackfillYearStats = {
+  const stats: BackfillMileageStats = {
     scanned: 0,
     resolved: 0,
     updated: 0,
@@ -51,7 +50,7 @@ export async function backfillYear(
       SELECT l.id, l.raw_title, d.description
       FROM listings l
       JOIN listing_details d ON d.listing_id = l.id
-      WHERE l.year IS NULL
+      WHERE l.mileage_km IS NULL
         AND d.description IS NOT NULL
         AND d.description <> '[GONE]'
         ${opts.afterId != null ? sql`AND l.id > ${opts.afterId.toString()}::bigint` : sql``}
@@ -69,18 +68,18 @@ export async function backfillYear(
       stats.nextCursor = typeof last === 'bigint' ? last.toString() : String(last);
     }
 
-    // Group ids by year so one UPDATE covers every listing of that year rather
+    // Group ids by mileage so one UPDATE covers every listing at that reading rather
     // than one statement per row.
-    const byYear = new Map<number, string[]>();
-    const sample: NonNullable<BackfillYearStats['sample']> = [];
+    const byKm = new Map<number, string[]>();
+    const sample: NonNullable<BackfillMileageStats['sample']> = [];
     for (const r of rows) {
-      const year = extractYearFromStoredText(r.description, r.raw_title);
-      if (year == null) continue;
+      const km = extractKmFromStoredText(r.description);
+      if (km == null) continue;
       stats.resolved++;
       const idStr = typeof r.id === 'bigint' ? r.id.toString() : String(r.id);
-      const arr = byYear.get(year) ?? [];
+      const arr = byKm.get(km) ?? [];
       arr.push(idStr);
-      byYear.set(year, arr);
+      byKm.set(km, arr);
       // Spread across the batch rather than taking the first 25: the head of a
       // page tends to be one dealer's listings, all in the same format, which
       // would make any sample look unanimous.
@@ -88,7 +87,7 @@ export async function backfillYear(
         sample.push({
           id: idStr,
           title: r.raw_title,
-          year,
+          km,
           snippet: r.description.replace(/\s+/g, ' ').slice(0, 120),
         });
       }
@@ -96,13 +95,13 @@ export async function backfillYear(
     if (dryRun) stats.sample = sample;
 
     if (!dryRun) {
-      for (const [year, ids] of byYear) {
-        // Re-check year IS NULL in the predicate so a concurrent scrape that
+      for (const [km, ids] of byKm) {
+        // Re-check mileage_km IS NULL in the predicate so a concurrent scrape that
         // already set it wins — this never overwrites.
         const updated = await db.execute(sql`
           UPDATE listings
-          SET year = ${year}
-          WHERE year IS NULL
+          SET mileage_km = ${km}
+          WHERE mileage_km IS NULL
             AND id IN (${sql.join(
               ids.map((id) => sql`${id}::bigint`),
               sql`, `,
@@ -117,7 +116,7 @@ export async function backfillYear(
       SELECT COUNT(*)::int AS n
       FROM listings l
       JOIN listing_details d ON d.listing_id = l.id
-      WHERE l.year IS NULL
+      WHERE l.mileage_km IS NULL
         AND d.description IS NOT NULL
         AND d.description <> '[GONE]'
     `)) as unknown as Array<{ n: number }>;
@@ -125,7 +124,7 @@ export async function backfillYear(
 
     return stats;
   } catch (e) {
-    Sentry.captureException(e, { tags: { component: 'backfill-year' } });
+    Sentry.captureException(e, { tags: { component: 'backfill-mileage' } });
     throw e;
   }
 }
