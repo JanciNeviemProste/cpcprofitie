@@ -161,7 +161,20 @@ export function parseDetailPage(html: string, listing: NormalizedListing): Norma
 // "MODEL 2020" — which is why a single-label lookup found a year on roughly one
 // listing in eight. Registration wins over MODEL: the Ford sample carries both
 // "MODEL 2020" and "Prvá evidencia 11/2019", and 2019 is the real one.
-const YEAR_LABELS = ['Rok výroby', 'r.v.', 'Prvá evidencia', '1. evidencia', 'Rok', 'MODEL'];
+// Order is significance, not convenience: a registration date beats "MODEL",
+// which on the Ford sample said 2020 while the car was first registered 11/2019.
+// 'r.v' is listed without its dot because sellers write it every way there is —
+// "r.v.", "r.v:", "r.v 2022/4", even "r.v11/2022" with nothing between at all.
+const YEAR_LABELS = [
+  'Rok výroby',
+  'r.v',
+  'Prvá evidencia',
+  '1. evidencia',
+  'registrácia',
+  'registracia',
+  'Rok',
+  'MODEL',
+];
 
 function rawTitleForYear($: cheerio.CheerioAPI): string | null {
   return $('h1').first().text().trim() || null;
@@ -226,23 +239,41 @@ function parseKmValue(text: string | null): number | null {
 function parseYearFromLabel(s: string | null): number | null {
   if (!s) return null;
   const max = new Date().getFullYear() + 1;
+  const ok = (y: number) => (y >= 1980 && y <= max ? y : null);
 
-  // MM/YY — anchored to the start so displacement further along cannot match.
-  const short = /^\s*(\d{1,2})\s*\/\s*(\d{2})(?!\d)/.exec(s);
+  // Every branch below is anchored to the start of the value, and they run
+  // most-specific first. That ordering is the whole correctness argument: a
+  // Bazoš value reads "12/22, 1968cm³, 110kW", so the generic
+  // four-digit branch would happily return the engine displacement. 1968, 1984
+  // and 2000 all pass a plausible-year check, so getting this wrong would not
+  // fail loudly — it would quietly file cars under the wrong decade.
+
+  // D.M.YYYY — dealers who paste an exact registration date ("18.1.2023").
+  const dmy = new RegExp('^\\s*(\\d{1,2})[./](\\d{1,2})[./](\\d{4})').exec(s);
+  if (dmy && Number(dmy[2]) >= 1 && Number(dmy[2]) <= 12) return ok(Number(dmy[3]));
+
+  // YYYY/M — the same pair as below with the halves swapped ("r.v 2022/4").
+  // Distinguishable from MM/YYYY only by width, hence two branches.
+  const ym = new RegExp('^\\s*(\\d{4})\\s*/\\s*(\\d{1,2})(?!\\d)').exec(s);
+  if (ym && Number(ym[2]) >= 1 && Number(ym[2]) <= 12) return ok(Number(ym[1]));
+
+  // MM/YY — the most common form on Bazoš, and the one that was dropped
+  // entirely until now.
+  const short = new RegExp('^\\s*(\\d{1,2})\\s*/\\s*(\\d{2})(?!\\d)').exec(s);
   if (short) {
     const month = Number(short[1]);
     const yy = Number(short[2]);
     if (month >= 1 && month <= 12) {
       // A two-digit year at or just past today reads as this century.
-      const year = yy <= (max % 100) ? 2000 + yy : 1900 + yy;
-      if (year >= 1980 && year <= max) return year;
+      return ok(yy <= max % 100 ? 2000 + yy : 1900 + yy);
     }
   }
 
-  const m = /(?:\d{1,2}\s*\/\s*)?(\d{4})/.exec(s);
-  if (!m) return null;
-  const n = Number(m[1]);
-  return Number.isFinite(n) && n >= 1980 && n <= max ? n : null;
+  // MM/YYYY or a bare year. Deliberately last and deliberately unanchored:
+  // it is the catch-all for "r.v.: 10/2018" and "model 2020", and by the time
+  // it runs every shape that could be confused with it has been ruled out.
+  const m = new RegExp('(?:\\d{1,2}\\s*/\\s*)?(\\d{4})').exec(s);
+  return m ? ok(Number(m[1])) : null;
 }
 
 /**
@@ -257,8 +288,13 @@ function boundedLabel(text: string, label: string, maxLen: number): string | nul
 }
 
 function extractAfterLabel(text: string, label: string): string | null {
-  // Match "Label: value" allowing optional whitespace + . / , ; line breaks.
-  const re = new RegExp(`${escapeRe(label)}\\s*[:\\-]?\\s*([^\\n,;]+?)(?:\\s{2,}|\\n|,|;|$)`, 'i');
+  // The gap between a label and its value is whatever the seller typed:
+  // "r.v.: 12/22", "r.v 2022/4", "Rok výroby:18.1.2023", or nothing at all
+  // in "r.v11/2022". Consuming all of it matters because parseYearFromLabel
+  // anchors its patterns to the start of the value — a leading ".:" left
+  // behind would push every date shape out of reach and fall through to the
+  // catch-all, which is exactly the branch that reads engine displacement.
+  const re = new RegExp(`${escapeRe(label)}[\\s:.-]*([^\\n,;]+?)(?:\\s{2,}|\\n|,|;|$)`, 'i');
   const m = re.exec(text);
   return m?.[1]?.trim() ?? null;
 }

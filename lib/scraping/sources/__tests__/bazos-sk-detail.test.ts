@@ -214,3 +214,49 @@ describe('bazos.sk detail — two-digit year', () => {
     expect(parse('r.v.: 19/22')).toBeUndefined();
   });
 });
+
+// Every string below is copied from a real listing that had no year in the
+// database. The formats are not variants of one pattern — sellers write the
+// year first, the month first, a full date, or no separator at all — so each
+// needs its own branch and each branch needs a case that would catch it
+// swallowing the neighbouring number instead.
+describe('bazos.sk detail — the year formats sellers actually write', () => {
+  function parse(text: string) {
+    const html = `<html><body><div class="popisdetail">${text}</div></body></html>`;
+    return parseDetailPage(html, stub('1', 'https://auto.bazos.sk/inzerat/1/x.php'))
+      .listingOverrides?.year;
+  }
+
+  it('reads a year-first pair', () => {
+    expect(parse('r.v 2022/4 s nájazdom 157800km')).toBe(2022);
+    expect(parse('✅️r.v: 2023/3')).toBe(2023);
+  });
+
+  it('reads a full registration date', () => {
+    expect(parse('✅Rok výroby: 5.2.2021')).toBe(2021);
+    expect(parse('✅Rok výroby:18.1.2023')).toBe(2023);
+    expect(parse('✅Rok výroby: 29.3.2023')).toBe(2023);
+  });
+
+  it('reads a label with nothing between it and the value', () => {
+    expect(parse('DSG automat 7st.,r.v11/2022, Diesel')).toBe(2022);
+  });
+
+  it('reads a registration label', () => {
+    expect(parse('✅️PRVÁ registrácia 06/2024, ✅️NÁJAZD 147 765 km.')).toBe(2024);
+  });
+
+  it('takes the year from a date, never the day or month', () => {
+    // 5.2.2021 must not read as 2005 via the day, nor 1.2023 as anything but
+    // 2023 — a date whose parts are all plausible is where an ordering slip
+    // would go unnoticed.
+    expect(parse('Rok výroby: 12.11.1998')).toBe(1998);
+  });
+
+  it('falls back to the bare year when the date is malformed', () => {
+    // Month 20 does not exist, so the date branch declines and the catch-all
+    // takes the only four-digit number present. Still 2021 — refusing to read
+    // the date must not cost us the year that is plainly there.
+    expect(parse('Rok výroby: 5.20.2021')).toBe(2021);
+  });
+});
