@@ -22,6 +22,16 @@ export interface ScraperSource {
   readonly baseUrl: string;
   /** Build the URL for a 1-based page index. */
   pageUrl(opts: { page: number }): string;
+  /**
+   * Size of this source's page space, when it is bounded and known.
+   *
+   * Sources whose pageUrl indexes a fixed list take the page number modulo that
+   * list, so asking for page 900 of an 847-entry space quietly returns page 53
+   * — the rotation would report progress while re-reading rows it had just
+   * read. Undefined means "unbounded as far as we know": depth is then learned
+   * from where the source starts returning nothing.
+   */
+  maxPage?: number;
   /** Parse a fetched listing page into normalized rows. */
   parseListingsPage(html: string): NormalizedListing[];
   /** OPTIONAL: build the detail-page URL for a listing. Required for

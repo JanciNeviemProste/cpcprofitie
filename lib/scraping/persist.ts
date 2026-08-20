@@ -340,6 +340,12 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
             url: sql`excluded.url`,
             rawJson: sql`excluded.raw_json`,
             lastSeenAt: sql`now()`,
+            // The freshness stamp, and the only place besides the detail
+            // refresh that is allowed to set it. A list page carries a price,
+            // so reaching this line means the price was genuinely re-read.
+            // last_seen_at cannot serve this purpose: check-removed bumps it
+            // after a HEAD request, which reads no price at all.
+            priceCheckedAt: sql`now()`,
             // Don't clobber a stronger fingerprint (computed post-enrichment)
             // with the weaker upsert-time one. Only set it when NULL.
             fingerprint: sql`coalesce(${listings.fingerprint}, excluded.fingerprint)`,
@@ -404,10 +410,73 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
   return { added, updated, skipped, lastError };
 }
 
-export async function recordScrapeRun(
+/**
+ * Open a run row before the work starts, so a run that never finishes still
+ * leaves evidence.
+ *
+ * The old recordScrapeRun wrote its row only after the scrape, the upsert and
+ * the enrichment had all completed. When the platform killed the function at
+ * its 300s ceiling — which it was doing daily, to whichever source came last in
+ * the loop — no row was written, no error was raised, and the source simply
+ * vanished from the day with nothing anywhere to say so. bazos.sk went missing
+ * from two runs out of three and the only way to notice was to count listings
+ * by hand.
+ *
+ * A `running` row older than a few minutes is now an unambiguous "a function
+ * died here", which is a thing that can be alerted on.
+ */
+export async function openScrapeRun(
+  source: Source,
+  intent: { startPage: number; endPage: number; cycleNo?: number },
+): Promise<bigint | null> {
+  if (!hasDb()) return null;
+  try {
+    const db = getDb();
+    const rows = await db
+      .insert(scrapeRuns)
+      .values({
+        source,
+        status: 'running',
+        startPage: intent.startPage,
+        endPage: intent.endPage,
+        cycleNo: intent.cycleNo ?? null,
+      })
+      .returning({ id: scrapeRuns.id });
+    return rows[0]?.id ?? null;
+  } catch (e) {
+    if (isConnectionError(e)) throw noteDbUnavailable(e, { step: 'openScrapeRun', source });
+    console.error('scrape_run_open_failed', e instanceof Error ? e.message : e);
+    Sentry.captureException(e, {
+      tags: { component: 'persist', step: 'openScrapeRun' },
+      extra: { source },
+    });
+    return null;
+  }
+}
+
+/**
+ * Close a run opened by openScrapeRun with what it actually covered.
+ *
+ * `status` deliberately ignores 404s. Once the rotation walks a source to its
+ * end, reaching the end is the normal outcome of a healthy run — treating it as
+ * a failure would turn the status column into noise within a week, precisely
+ * when it starts being the thing that tells us a source is broken.
+ */
+export async function closeScrapeRun(
+  runId: bigint | null,
   source: Source,
   result: ScrapeResult,
   counts: UpsertCounts,
+  coverage: {
+    startPage: number;
+    endPage: number;
+    pagesOk: number;
+    pagesEmpty: number;
+    pagesNotFound: number;
+    pagesError: number;
+    cycleNo?: number;
+    stoppedReason?: string;
+  },
 ): Promise<void> {
   if (!hasDb()) return;
   try {
@@ -415,21 +484,37 @@ export async function recordScrapeRun(
     const combinedErrors: string[] = [];
     if (result.errors.length > 0) combinedErrors.push(...result.errors.slice(0, 5));
     if (counts.lastError) combinedErrors.push(`upsert: ${counts.lastError}`);
-    await db.insert(scrapeRuns).values({
-      source,
-      status: result.errors.length === 0 && !counts.lastError ? 'succeeded' : 'failed',
-      startedAt: result.startedAt,
+    const failed = coverage.pagesError > 0 || Boolean(counts.lastError);
+
+    const values = {
+      status: (failed ? 'failed' : 'succeeded') as 'failed' | 'succeeded',
       finishedAt: result.finishedAt,
       listingsAdded: counts.added,
       listingsUpdated: counts.updated,
       errorMessage: combinedErrors.length > 0 ? combinedErrors.join('; ') : null,
-    });
+      startPage: coverage.startPage,
+      endPage: coverage.endPage,
+      pagesOk: coverage.pagesOk,
+      pagesEmpty: coverage.pagesEmpty,
+      pagesNotFound: coverage.pagesNotFound,
+      pagesError: coverage.pagesError,
+      cycleNo: coverage.cycleNo ?? null,
+      stoppedReason: coverage.stoppedReason ?? null,
+    };
+
+    if (runId == null) {
+      // openScrapeRun could not write (no DB at the time, or it failed). Still
+      // record the outcome rather than losing the run entirely.
+      await db.insert(scrapeRuns).values({ source, startedAt: result.startedAt, ...values });
+      return;
+    }
+    await db.update(scrapeRuns).set(values).where(eq(scrapeRuns.id, runId));
   } catch (e) {
-    if (isConnectionError(e)) throw noteDbUnavailable(e, { step: 'recordScrapeRun', source });
-    console.error('scrape_run_record_failed', e instanceof Error ? e.message : e);
-    // Lost audit trail without alerting blinds us to schema-drift-style bugs.
+    if (isConnectionError(e)) throw noteDbUnavailable(e, { step: 'closeScrapeRun', source });
+    console.error('scrape_run_close_failed', e instanceof Error ? e.message : e);
+    // A lost audit trail hides schema-drift-style bugs, so it pages.
     Sentry.captureException(e, {
-      tags: { component: 'persist', step: 'recordScrapeRun' },
+      tags: { component: 'persist', step: 'closeScrapeRun' },
       extra: { source },
     });
   }

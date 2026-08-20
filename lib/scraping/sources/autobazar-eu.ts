@@ -151,6 +151,13 @@ export function parseListingsPage(html: string): NormalizedListing[] {
 // buckets. Generated 2026-05-12. Regenerate via scripts/gen-autobazar-eu-buckets.ts
 // when the catalog drifts. Brand-only buckets sit first so the scraper hits
 // broad pools before narrow ones.
+// How deep to page inside one brand/model bucket. Buckets are long-tailed —
+// "škoda octavia" has hundreds of pages, "denza n9" has one — so a shallow
+// bucket simply returns empty pages, which the page classifier records as
+// `empty` and the rotation skips over. Set to cover the large buckets without
+// spending the whole budget on the tail.
+const PAGES_PER_BUCKET = 8;
+
 export const BRAND_MODEL_BUCKETS: ReadonlyArray<{ brand: string; model: string | null }> = [
   { brand: 'skoda', model: null },
   { brand: 'volkswagen', model: null },
@@ -1004,13 +1011,32 @@ export const BRAND_MODEL_BUCKETS: ReadonlyArray<{ brand: string; model: string |
 export const autobazarEu: ScraperSource = {
   id: 'autobazar.eu',
   baseUrl: BASE,
+  // The page argument walks bucket AND depth as one flat sequence, the same shape
+  // autobazar.sk uses for brands: pages 1..PAGES_PER_BUCKET are the first
+  // bucket, then the next, and so on.
+  //
+  // Depth is the point. Before this, every page mapped to bucket-page-1, so the
+  // cron re-read the same ~16 940 listings for ever while the corpus held
+  // 47 373 — two thirds of the source was unreachable at any startPage.
+  // Verified live that the site paginates: pages 1, 2 and 4 of one bucket
+  // return completely disjoint sets of listings (13 / 19 / 20 links, zero
+  // overlap in all three pairings), and each carries the same __NEXT_DATA__
+  // payload parseListingsPage already reads.
   pageUrl({ page }) {
-    const idx = (Math.max(1, page) - 1) % BRAND_MODEL_BUCKETS.length;
+    const p = Math.max(1, page) - 1;
+    const idx = Math.floor(p / PAGES_PER_BUCKET) % BRAND_MODEL_BUCKETS.length;
+    const bucketPage = (p % PAGES_PER_BUCKET) + 1;
     const bucket = BRAND_MODEL_BUCKETS[idx]!;
-    return bucket.model
+    const path = bucket.model
       ? `${BASE}/vysledky/osobne-vozidla/${bucket.brand}/${bucket.model}/`
       : `${BASE}/vysledky/osobne-vozidla/${bucket.brand}/`;
+    return bucketPage === 1 ? path : `${path}?page=${bucketPage}`;
   },
+  // The rotation needs to know where the space ends, because `page` is taken
+  // modulo the bucket count: without this, startPage past the end silently
+  // wraps to the beginning and the cursor reports progress while re-reading
+  // rows it just read.
+  maxPage: BRAND_MODEL_BUCKETS.length * PAGES_PER_BUCKET,
   parseListingsPage,
   detailUrl,
   parseDetailPage,

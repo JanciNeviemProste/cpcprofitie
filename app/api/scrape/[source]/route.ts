@@ -6,7 +6,8 @@ import { isSameOrigin } from '@/lib/auth/csrf';
 import {
   ALL_SOURCES,
   getSource,
-  recordScrapeRun,
+  openScrapeRun,
+  closeScrapeRun,
   runScrape,
   upsertListings,
   type Source,
@@ -57,9 +58,18 @@ export async function POST(request: Request, ctx: Ctx) {
   }
 
   try {
+    const runId = await openScrapeRun(source.id, { startPage: 1, endPage: parsed.data.pages });
     const result = await runScrape(source, { pages: parsed.data.pages });
     const counts = await upsertListings(result.listings);
-    await recordScrapeRun(source.id, result, counts);
+    await closeScrapeRun(runId, source.id, result, counts, {
+      startPage: 1,
+      endPage: result.lastPage,
+      pagesOk: result.outcomes.filter((o) => o.kind === 'ok').length,
+      pagesEmpty: result.outcomes.filter((o) => o.kind === 'empty').length,
+      pagesNotFound: result.outcomes.filter((o) => o.kind === 'notFound').length,
+      pagesError: result.outcomes.filter((o) => o.kind === 'error').length,
+      stoppedReason: result.stoppedReason,
+    });
 
     const status =
       result.errors.length === 0

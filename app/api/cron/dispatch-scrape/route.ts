@@ -3,28 +3,40 @@ import * as Sentry from '@sentry/nextjs';
 import { DbUnavailableError } from '@/lib/db/errors';
 import {
   ALL_SOURCES,
+  closeScrapeRun,
   getSource,
-  persistDetails,
-  recordScrapeRun,
-  runEnrichment,
+  openScrapeRun,
   runScrape,
   upsertListings,
+  type Source,
 } from '@/lib/scraping';
+import { advanceCursor, loadCursor, pickSource } from '@/lib/scraping/rotation';
 
-// Vercel Cron entry point. Iterates registered sources sequentially with
-// per-source try/catch isolation: one source failing (HTTP, parse, persist)
-// does NOT kill the rest. Scheduled in vercel.ts as `0 */6 * * *` (requires
-// Vercel Pro plan for sub-daily cadence).
+// Vercel Cron entry point.
+//
+// One source per invocation, and the page window moves.
+//
+// It used to loop all three sources inside one 300s function with startPage
+// pinned to 1, which had two consequences. Every run re-read pages 1–30 of each
+// source — the same ~600 of 78 775 listings — so anything deeper was refreshed
+// never, and a price could sit unverified indefinitely while the freshness
+// numbers looked fine. And whichever source came last in the loop was killed by
+// the function ceiling before it ran: bazos.sk missed two runs out of three,
+// leaving no scrape_runs row, no error, and nothing anywhere to notice.
+//
+// A run with exactly one source cannot half-finish its list, and a cursor that
+// advances means the whole corpus comes round.
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 const PROD = process.env.VERCEL_ENV === 'production';
 
-// Per-source budget tuned to stay under 300s function timeout when running
-// scrape + enrichment together. Manual catch-up triggers (?source=X&startPage=N)
-// can still go wider since they hit one source at a time.
-const PAGES_PER_RUN = 30;
-const ENRICH_LIMIT_PER_RUN = 40;
+// Pages per invocation. Enrichment used to eat ~240s of the budget from inside
+// this route; it now runs as its own cron, so the walk gets the time.
+const PAGES_PER_RUN = 80;
+// Stop with enough room to persist, advance the cursor and close the run row.
+// Being killed mid-flight is what made the old failure invisible.
+const TIME_BUDGET_MS = 240_000;
 
 export async function GET(request: Request) {
   const expected = process.env.CRON_SECRET;
@@ -39,100 +51,114 @@ export async function GET(request: Request) {
     }
   }
 
-  type PerSource = {
-    source: string;
-    status: 'succeeded' | 'failed';
-    listingsFound: number;
-    counts?: { added: number; updated: number; skipped: number };
-    enrichment?: { fetched: number; detailsUpserted: number; photosInserted: number };
-    errors: string[];
-  };
-  const summary: PerSource[] = [];
-
-  // Optional ?source=X filter — lets callers run a single source so that the
-  // 300s function budget applies per source rather than to the whole sweep.
-  // Useful for the (now multi-step) manual catch-up flow; the scheduled cron
-  // hits this without a filter and runs all sources serially.
+  const startedAt = Date.now();
   const url = new URL(request.url);
-  const sourceFilter = url.searchParams.get('source');
-  const startPageParam = Number(url.searchParams.get('startPage') ?? '1');
-  const startPage = Number.isFinite(startPageParam) && startPageParam >= 1
-    ? Math.floor(startPageParam)
-    : 1;
-  const sources = sourceFilter
-    ? ALL_SOURCES.filter((s) => s === sourceFilter)
-    : ALL_SOURCES;
 
-  for (const id of sources) {
-    try {
-      const source = getSource(id);
-      const result = await runScrape(source, {
-        pages: PAGES_PER_RUN,
-        startPage,
-      });
-      const counts = await upsertListings(result.listings);
-      await recordScrapeRun(id, result, counts);
+  // ?source= pins the source (the cron schedules one per entry, and manual
+  // catch-ups target one at a time). Without it, the clock picks — so an
+  // unparameterised call still rotates instead of always hitting the same one.
+  const sourceFilter = url.searchParams.get('source') as Source | null;
+  const id: Source =
+    sourceFilter && (ALL_SOURCES as readonly string[]).includes(sourceFilter)
+      ? sourceFilter
+      : pickSource(ALL_SOURCES, new Date());
 
-      let enrichment: PerSource['enrichment'];
-      if (source.parseDetailPage) {
-        // Stay with the default 40-per-run enrich budget. Bumping to 100 for
-        // a single-source manual catch-up pushed bazos.eu past the 300s
-        // function timeout (~210s of fetches + parse + DB upserts).
-        const enrichLimit = ENRICH_LIMIT_PER_RUN;
-        const enrichResult = await runEnrichment(source, result.listings, {
-          limit: enrichLimit,
-        });
-        const detailCounts = await persistDetails(enrichResult.details);
-        enrichment = {
-          fetched: enrichResult.fetched,
-          detailsUpserted: detailCounts.detailsUpserted,
-          photosInserted: detailCounts.photosInserted,
-        };
-        if (enrichResult.errors.length > 0) {
-          console.warn('enrichment_partial', {
-            source: id,
-            errorsSample: enrichResult.errors.slice(0, 3),
-          });
-        }
-      }
+  // ?startPage= overrides the cursor for a manual catch-up. The cursor still
+  // advances from wherever the run ends, so a manual jump is not undone.
+  const startPageParam = Number(url.searchParams.get('startPage') ?? '');
+  const startPageOverride =
+    Number.isFinite(startPageParam) && startPageParam >= 1 ? Math.floor(startPageParam) : null;
 
-      summary.push({
-        source: id,
-        status: result.errors.length === 0 ? 'succeeded' : 'failed',
-        listingsFound: result.listings.length,
-        counts,
-        enrichment,
-        errors: result.errors,
-      });
-    } catch (e) {
-      // A dead database makes the remaining sources pointless; a scrape
-      // failure on one site does not.
-      if (e instanceof DbUnavailableError) {
-        return NextResponse.json({ error: 'db_unavailable', summary }, { status: 503 });
-      }
-      console.error('cron_scrape_source_failed', {
-        source: id,
-        error: e instanceof Error ? e.message : e,
-      });
-      Sentry.captureException(e, {
+  const pagesParam = Number(url.searchParams.get('pages') ?? '');
+  const pages =
+    Number.isFinite(pagesParam) && pagesParam >= 1
+      ? Math.min(500, Math.floor(pagesParam))
+      : PAGES_PER_RUN;
+
+  let runId: bigint | null = null;
+  try {
+    const source = getSource(id);
+    const cursor = await loadCursor(id, source.maxPage ?? null);
+    const startPage = startPageOverride ?? cursor.nextPage;
+    const endPage = startPage + pages - 1;
+
+    // Opened before the work, so a function killed mid-run leaves a `running`
+    // row that ages into an alert instead of leaving nothing at all.
+    runId = await openScrapeRun(id, { startPage, endPage, cycleNo: cursor.cycleNo });
+
+    const result = await runScrape(source, {
+      pages,
+      startPage,
+      deadline: startedAt + TIME_BUDGET_MS,
+    });
+    const counts = await upsertListings(result.listings);
+
+    const pagesOk = result.outcomes.filter((o) => o.kind === 'ok').length;
+    const pagesEmpty = result.outcomes.filter((o) => o.kind === 'empty').length;
+    const pagesNotFound = result.outcomes.filter((o) => o.kind === 'notFound').length;
+    const pagesError = result.outcomes.filter((o) => o.kind === 'error').length;
+
+    // Advanced only now, with the listings already persisted.
+    const advanced = await advanceCursor(id, cursor, {
+      lastPage: Math.max(result.lastPage, startPage - 1),
+      endOfCatalog: result.stoppedReason === 'endOfCatalog',
+      failed: pagesOk === 0 && pagesError > 0,
+    });
+
+    await closeScrapeRun(runId, id, result, counts, {
+      startPage,
+      endPage: Math.max(result.lastPage, startPage - 1),
+      pagesOk,
+      pagesEmpty,
+      pagesNotFound,
+      pagesError,
+      cycleNo: cursor.cycleNo,
+      stoppedReason: result.stoppedReason,
+    });
+
+    if (advanced.forcedPastFailure) {
+      Sentry.captureMessage(`Scrape cursor forced past a repeatedly failing page on ${id}`, {
+        level: 'error',
         tags: { component: 'scraper' },
-        extra: { source: id },
-      });
-      summary.push({
-        source: id,
-        status: 'failed',
-        listingsFound: 0,
-        errors: [e instanceof Error ? e.message : 'unknown error'],
+        extra: { source: id, startPage, nextPage: advanced.nextPage },
       });
     }
-  }
 
-  // 502 if any source failed — Vercel Cron Dashboard then surfaces it red
-  // instead of pretending everything's fine. Critical for not silently
-  // regressing to the "weeks of zero data" pattern.
-  const anyFailed = summary.some((s) => s.status === 'failed');
-  return NextResponse.json(
-    { dispatchedAt: new Date().toISOString(), summary },
-    { status: anyFailed ? 502 : 200 },
-  );
+    const body = {
+      dispatchedAt: new Date().toISOString(),
+      source: id,
+      startPage,
+      lastPage: result.lastPage,
+      nextPage: advanced.nextPage,
+      cycleNo: advanced.cycleNo,
+      cycleWrapped: advanced.wrapped,
+      stoppedReason: result.stoppedReason,
+      pages: { ok: pagesOk, empty: pagesEmpty, notFound: pagesNotFound, error: pagesError },
+      listingsFound: result.listings.length,
+      counts,
+      errors: result.errors.slice(0, 5),
+      elapsedMs: Date.now() - startedAt,
+    };
+
+    // Red only when pages genuinely failed. Running off the end of a source is
+    // the normal outcome of a healthy rotation — reporting that as a failure
+    // would turn this signal into noise within a week, right when it becomes
+    // the thing that tells us a source has broken.
+    return NextResponse.json(body, { status: pagesError > 0 && pagesOk === 0 ? 502 : 200 });
+  } catch (e) {
+    if (e instanceof DbUnavailableError) {
+      return NextResponse.json({ error: 'db_unavailable', source: id }, { status: 503 });
+    }
+    console.error('cron_scrape_source_failed', {
+      source: id,
+      error: e instanceof Error ? e.message : e,
+    });
+    Sentry.captureException(e, { tags: { component: 'scraper' }, extra: { source: id } });
+    return NextResponse.json(
+      { error: 'scrape_failed', source: id, message: e instanceof Error ? e.message : 'unknown' },
+      { status: 502 },
+    );
+  }
 }
+
+export const POST = GET;

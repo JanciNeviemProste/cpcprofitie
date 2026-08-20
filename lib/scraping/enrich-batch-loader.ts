@@ -9,13 +9,17 @@
 //                            detail page for old rows scraped before the
 //                            listing-page parser extracted price.
 
-import { and, eq, gt, isNull, notExists, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, notExists, sql } from 'drizzle-orm';
 import { getDb } from '../db';
 import { listingDetails, listings } from '../db/schema';
 import type { NormalizedListing, Source } from './types';
 
 export type PartitionOpts = { index: number; modulo: number };
-export type EnrichSelectMode = 'unenriched' | 'null-price' | 'null-model';
+export type EnrichSelectMode =
+  | 'unenriched'
+  | 'unenriched-newest'
+  | 'null-price'
+  | 'null-model';
 
 export async function loadUnenrichedBatch(
   source: Source,
@@ -55,6 +59,12 @@ export async function loadUnenrichedBatch(
             .from(listingDetails)
             .where(eq(listingDetails.listingId, listings.id)),
         );
+
+  // 'unenriched' walks oldest-first, which is right for grinding down a
+  // backlog and wrong for everything else: with tens of thousands of old rows
+  // queued, a listing that appeared this morning would wait behind all of them
+  // — and a new listing is exactly the one a flip opportunity is about.
+  const order = mode === 'unenriched-newest' ? desc(listings.firstSeenAt) : listings.id;
   const rows = await db
     .select({
       id: listings.id,
@@ -70,7 +80,7 @@ export async function loadUnenrichedBatch(
     })
     .from(listings)
     .where(and(eq(listings.source, source), selectFilter, partitionFilter))
-    .orderBy(listings.id)
+    .orderBy(order)
     .limit(size);
 
   return rows.map((r) => ({

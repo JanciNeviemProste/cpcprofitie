@@ -2,7 +2,11 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": ["fra1"],
   "crons": [
-    { "path": "/api/cron/dispatch-scrape", "schedule": "0 */6 * * *" },
+    { "path": "/api/cron/dispatch-scrape?source=bazos.sk", "schedule": "10 */4 * * *" },
+    { "path": "/api/cron/dispatch-scrape?source=autobazar.sk", "schedule": "25 */4 * * *" },
+    { "path": "/api/cron/dispatch-scrape?source=autobazar.eu", "schedule": "40 */4 * * *" },
+    { "path": "/api/cron/enrich-source?mode=unenriched-newest", "schedule": "55 */4 * * *" },
+    { "path": "/api/cron/enrich-source?mode=unenriched", "schedule": "15 1,9,17 * * *" },
     { "path": "/api/cron/weekly-maintenance", "schedule": "0 2 * * 0" },
     { "path": "/api/cron/check-removed", "schedule": "0 3 * * *" },
     { "path": "/api/cron/daily-price-snapshot", "schedule": "0 4 * * *" },

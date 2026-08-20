@@ -303,7 +303,14 @@ export async function refreshFingerprints(
         staleDays != null
           ? sql`AND (
               l.fingerprint IS NULL
-              OR l.last_seen_at > now() - (${staleDays}::int * interval '1 day')
+              -- Keyed on when the price was last verified, not on last_seen_at.
+              -- check-removed bumps last_seen_at after a HEAD request, so that
+              -- column moves for rows whose data did not change — and once the
+              -- page rotation touches every listing every few days, a
+              -- time-window predicate matches the entire corpus, the LIMIT
+              -- truncates it arbitrarily, and the incremental refresh quietly
+              -- becomes a full scan that never finishes.
+              OR l.price_checked_at > now() - (${staleDays}::int * interval '1 day')
               OR d.detailed_at > now() - (${staleDays}::int * interval '1 day')
             )`
           : sql``

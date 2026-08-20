@@ -5,7 +5,7 @@
 
 import { crawlDelayFor, isAllowed, parseRobotsTxt } from './robots';
 import { ScrapeForbiddenError, USER_AGENT, type ScraperSource } from './sources/source-interface';
-import type { NormalizedListing, ScrapeResult, Source } from './types';
+import type { NormalizedListing, PageOutcome, ScrapeResult, Source } from './types';
 
 export type RunScrapeOptions = {
   pages?: number;
@@ -15,6 +15,19 @@ export type RunScrapeOptions = {
   /** 1-based page index to start at. Lets callers walk a deep paginated source
    *  across multiple invocations (bazos.sk has ~12k pages of 20 listings each). */
   startPage?: number;
+  /**
+   * Epoch ms after which the walk stops early and reports what it covered.
+   *
+   * Without this the platform kills the function mid-page and the run leaves
+   * nothing behind — no row, no error, no trace. Stopping on our own terms lets
+   * the cursor advance by the pages actually persisted.
+   */
+  deadline?: number;
+  /**
+   * Consecutive empty/404 pages that mean the source has run out, rather than
+   * one short brand in a ragged sequence.
+   */
+  endOfCatalogStreak?: number;
 };
 
 type RobotsCacheEntry = {
@@ -93,8 +106,14 @@ export async function runScrape(
     : (opts.delayMs ?? 1500);
 
   const firstPage = Math.max(1, opts.startPage ?? 1);
-  const lastPage = firstPage + pages - 1;
-  for (let page = firstPage; page <= lastPage; page++) {
+  const lastRequestedPage = firstPage + pages - 1;
+  const streakLimit = Math.max(1, opts.endOfCatalogStreak ?? 3);
+  const outcomes: PageOutcome[] = [];
+  let emptyStreak = 0;
+  let lastPage = firstPage - 1;
+  let stoppedReason: ScrapeResult['stoppedReason'] = 'range';
+
+  for (let page = firstPage; page <= lastRequestedPage; page++) {
     const url = source.pageUrl({ page });
     let parsed: URL;
     try {
@@ -114,17 +133,47 @@ export async function runScrape(
         headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' },
       });
       pagesVisited++;
-      if (!res.ok) {
+      lastPage = page;
+      if (res.status === 404 || res.status === 410) {
+        outcomes.push({ page, kind: 'notFound', listings: 0 });
+        emptyStreak++;
+      } else if (!res.ok) {
+        outcomes.push({ page, kind: 'error', listings: 0, message: `HTTP ${res.status}` });
         errors.push(`page ${page}: HTTP ${res.status}`);
-        continue;
+        emptyStreak = 0;
+      } else {
+        const html = await res.text();
+        const pageListings = source.parseListingsPage(html);
+        listings.push(...pageListings);
+        if (pageListings.length === 0) {
+          outcomes.push({ page, kind: 'empty', listings: 0 });
+          emptyStreak++;
+        } else {
+          outcomes.push({ page, kind: 'ok', listings: pageListings.length });
+          emptyStreak = 0;
+        }
       }
-      const html = await res.text();
-      const pageListings = source.parseListingsPage(html);
-      listings.push(...pageListings);
     } catch (e) {
-      errors.push(`page ${page}: ${e instanceof Error ? e.message : 'unknown error'}`);
+      lastPage = page;
+      const message = e instanceof Error ? e.message : 'unknown error';
+      outcomes.push({ page, kind: 'error', listings: 0, message });
+      errors.push(`page ${page}: ${message}`);
+      emptyStreak = 0;
     }
-    if (page < lastPage) await sleep(delay);
+
+    // Past the declared end of the space, a streak of nothing means the source
+    // is exhausted rather than broken. Inside it, an empty page is just a short
+    // brand in a ragged sequence and the walk carries on.
+    const pastDeclaredEnd = source.maxPage == null || page >= source.maxPage;
+    if (emptyStreak >= streakLimit && pastDeclaredEnd) {
+      stoppedReason = 'endOfCatalog';
+      break;
+    }
+    if (opts.deadline != null && Date.now() + delay >= opts.deadline) {
+      stoppedReason = 'deadline';
+      break;
+    }
+    if (page < lastRequestedPage) await sleep(delay);
   }
 
   return {
@@ -134,6 +183,9 @@ export async function runScrape(
     listings,
     pagesVisited,
     errors,
+    outcomes,
+    lastPage,
+    stoppedReason,
   };
 }
 

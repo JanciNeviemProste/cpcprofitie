@@ -34,6 +34,13 @@ export async function GET(request: Request) {
       WHERE price_eur IS NOT NULL
         AND sold_at IS NULL
         AND removed_at IS NULL
+        -- Only prices someone actually re-read recently. Without this the
+        -- series records that OUR NUMBER did not change, which is not the same
+        -- claim as the seller not changing the price — and while the crawler
+        -- was re-reading only 600 of 78 775 listings, it was mostly the former.
+        -- 74 708 day-over-day comparisons produced 49 price changes.
+        -- A gap in the series is honest; a flat line is a lie.
+        AND price_checked_at > now() - interval '7 days'
       ON CONFLICT DO NOTHING
     `),
       { step: 'daily-price-snapshot' },

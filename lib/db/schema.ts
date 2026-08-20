@@ -140,6 +140,10 @@ export const listings = pgTable(
     // Defaults true: unclassified means car, because dropping a real car from the
     // market costs far more than leaving one bumper in a cohort.
     isVehicle: boolean('is_vehicle').notNull().default(true),
+    // When a price was last actually read from the source. NOT last_seen_at:
+    // check-removed stamps that after a HEAD request, which reads no price, so
+    // it reports freshness a stale price does not have. See 0012.
+    priceCheckedAt: timestamp('price_checked_at', { withTimezone: true }),
   },
   (t) => [
     uniqueIndex('listings_source_source_id_idx').on(t.source, t.sourceId),
@@ -343,9 +347,35 @@ export const scrapeRuns = pgTable(
     listingsAdded: integer('listings_added').notNull().default(0),
     listingsUpdated: integer('listings_updated').notNull().default(0),
     errorMessage: text('error_message'),
+    // What the run covered. A bare 'succeeded' says nothing when a run can
+    // touch 1% of the corpus; these are what make the status readable.
+    startPage: integer('start_page'),
+    endPage: integer('end_page'),
+    pagesOk: integer('pages_ok').notNull().default(0),
+    pagesEmpty: integer('pages_empty').notNull().default(0),
+    pagesNotFound: integer('pages_not_found').notNull().default(0),
+    pagesError: integer('pages_error').notNull().default(0),
+    cycleNo: integer('cycle_no'),
+    stoppedReason: text('stopped_reason'),
   },
   (t) => [index('scrape_runs_source_started_idx').on(t.source, t.startedAt)],
 );
+
+// Where the page rotation has got to, per source. See 0012_freshness_rotation.sql
+// for why this is a stored cursor rather than a function of the clock.
+export const scrapeCursors = pgTable('scrape_cursors', {
+  source: varchar('source', { length: 32 }).primaryKey(),
+  /** Next page to fetch. Advanced only after the pages are persisted. */
+  nextPage: integer('next_page').notNull().default(1),
+  /** Declared size of the page space; a change resets the cursor. */
+  pageSpace: integer('page_space'),
+  /** Highest page observed to return listings — learned, not hardcoded. */
+  maxKnownPage: integer('max_known_page'),
+  cycleNo: integer('cycle_no').notNull().default(1),
+  cycleStartedAt: timestamp('cycle_started_at', { withTimezone: true }).notNull().defaultNow(),
+  consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const listingPriceHistory = pgTable(
   'listing_price_history',

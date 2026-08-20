@@ -203,6 +203,10 @@ export const autobazarSk: ScraperSource = {
       ? `https://${brand}.autobazar.sk/`
       : `https://${brand}.autobazar.sk/?p[page]=${brandPage}`;
   },
+  // Brands × pages is a ragged rectangle flattened into a rectangle, so a 404
+  // partway through is a short brand, not the end of the source. Only a 404
+  // past this bound means there is nothing left.
+  maxPage: TOP_BRANDS.length * PAGES_PER_BRAND,
   parseListingsPage,
   detailUrl,
   parseDetailPage,

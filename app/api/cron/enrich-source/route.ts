@@ -5,6 +5,7 @@ import { getSource } from '@/lib/scraping';
 import { loadUnenrichedBatch, type EnrichSelectMode } from '@/lib/scraping/enrich-batch-loader';
 import { persistDetails, runEnrichment } from '@/lib/scraping';
 import { ALL_SOURCES, type Source } from '@/lib/scraping';
+import { pickSource } from '@/lib/scraping/rotation';
 
 // Server-side detail enrichment for a single source. Driven by a local Bash
 // loop that POSTs repeatedly until { done: true }. Each invocation runs as
@@ -38,10 +39,29 @@ export async function POST(request: Request) {
     mode?: string;
     afterId?: string;
   } = {};
-  try {
-    payload = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'bad_json' }, { status: 400 });
+  // Vercel Cron issues a GET with no body, so parameters have to be readable
+  // from the query string too. Kept POST+body working for the driver script,
+  // which loops until { done: true }.
+  const qs = new URL(request.url).searchParams;
+  if (request.method === 'GET') {
+    payload = {
+      source: qs.get('source') ?? undefined,
+      mode: qs.get('mode') ?? undefined,
+      afterId: qs.get('afterId') ?? undefined,
+      partition: qs.get('partition') ? Number(qs.get('partition')) : undefined,
+      modulo: qs.get('modulo') ? Number(qs.get('modulo')) : undefined,
+    };
+  } else {
+    try {
+      payload = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'bad_json' }, { status: 400 });
+    }
+  }
+  if (!payload.source) {
+    // Rotate by the clock when the cron does not name one, so no source is
+    // permanently last in line — the failure that made bazos.sk disappear.
+    payload.source = pickSource(ALL_SOURCES, new Date());
   }
   const sourceId = payload.source;
   // 'null-price' / 'null-model' re-fetch detail pages for active listings
@@ -52,7 +72,9 @@ export async function POST(request: Request) {
       ? 'null-price'
       : payload.mode === 'null-model'
         ? 'null-model'
-        : 'unenriched';
+        : payload.mode === 'unenriched-newest'
+          ? 'unenriched-newest'
+          : 'unenriched';
   const isBackfill = mode === 'null-price' || mode === 'null-model';
   // Cursor carried across invocations so the driver walks the whole backfill
   // set once. Without it, rows that stay NULL after enrichment (Cena dohodou,
@@ -163,3 +185,7 @@ export async function POST(request: Request) {
     elapsedMs: Date.now() - startedAt,
   });
 }
+
+// Vercel Cron sends GET; the driver script sends POST with a body. Both land
+// here.
+export const GET = POST;

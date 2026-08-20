@@ -44,13 +44,38 @@ export type NormalizedListing = {
   sellerPhone?: string | null;
 };
 
+/**
+ * What one page fetch produced.
+ *
+ * `notFound` is separate from `error` on purpose. Once the scraper rotates
+ * through a source's whole depth, running off the end is the normal outcome of
+ * a healthy run — folding it into errors marked those runs failed, and a status
+ * that goes red during correct operation stops meaning anything within a week.
+ */
+export type PageOutcomeKind = 'ok' | 'empty' | 'notFound' | 'error';
+
+export type PageOutcome = {
+  page: number;
+  kind: PageOutcomeKind;
+  listings: number;
+  message?: string;
+};
+
 export type ScrapeResult = {
   source: Source;
   startedAt: Date;
   finishedAt: Date;
   listings: NormalizedListing[];
   pagesVisited: number;
+  /** Only genuine failures — never a 404 at the end of the catalogue. */
   errors: string[];
+  outcomes: PageOutcome[];
+  /** Highest page reached, so the caller can advance a cursor by what was
+   *  actually covered rather than by what was requested. */
+  lastPage: number;
+  /** Why the walk ended: 'range' (did what was asked), 'deadline' (ran out of
+   *  time), or 'endOfCatalog' (source has no more pages). */
+  stoppedReason: 'range' | 'deadline' | 'endOfCatalog';
 };
 
 export type SellerType = 'private' | 'dealer';

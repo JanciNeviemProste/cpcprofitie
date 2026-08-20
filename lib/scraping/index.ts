@@ -14,7 +14,7 @@ export {
   parseYear,
   slugify,
 } from './normalize';
-export { upsertListings, recordScrapeRun, persistDetails } from './persist';
+export { upsertListings, openScrapeRun, closeScrapeRun, persistDetails } from './persist';
 export { runEnrichment, __resetEnrichRobotsCache } from './enrich';
 export type { ScraperSource, RunScrapeOptions } from './scrape';
 export type { EnrichOptions, EnrichResult } from './enrich';
