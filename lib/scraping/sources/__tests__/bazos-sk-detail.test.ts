@@ -175,3 +175,42 @@ describe('bazos.sk detail — labels that run into prose', () => {
     expect(d.listingOverrides?.mileageKm).toBe(226000);
   });
 });
+
+// Regression: Bazoš mostly writes the year two digits — "r.v.: 12/22" — and the
+// parser only understood four, so 4 779 cars sat with no year and stayed out of
+// every cohort. The same string carries engine displacement, and 1968, 1984 and
+// 2000 all look like plausible years, so getting the order wrong would file
+// cars under the wrong decade instead of failing visibly.
+describe('bazos.sk detail — two-digit year', () => {
+  function parse(label: string) {
+    const html = `<html><body><div class="popisdetail">${label}</div></body></html>`;
+    return parseDetailPage(html, stub('1', 'https://auto.bazos.sk/inzerat/1/x.php'))
+      .listingOverrides?.year;
+  }
+
+  it('reads MM/YY', () => {
+    expect(parse('r.v.: 12/22')).toBe(2022);
+    expect(parse('r.v.: 3/19')).toBe(2019);
+  });
+
+  it('reads a nineties car as 19xx, not 20xx', () => {
+    expect(parse('r.v.: 05/98')).toBe(1998);
+  });
+
+  it('does not mistake engine displacement for the year', () => {
+    // The real string that exposed this: displacement follows the year.
+    expect(parse('r.v.: 12/22, 1968cm³, 110kW (150PS), Automat')).toBe(2022);
+    // And on its own, displacement must not become a year at all.
+    expect(parse('Objem: 1984cm³')).toBeUndefined();
+    expect(parse('Objem: 2000cm³')).toBeUndefined();
+  });
+
+  it('still reads the four-digit forms', () => {
+    expect(parse('Rok výroby: 10/2018')).toBe(2018);
+    expect(parse('MODEL 2020')).toBe(2020);
+  });
+
+  it('rejects an impossible month rather than guessing', () => {
+    expect(parse('r.v.: 19/22')).toBeUndefined();
+  });
+});

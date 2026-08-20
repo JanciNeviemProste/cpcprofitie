@@ -167,6 +167,19 @@ function rawTitleForYear($: cheerio.CheerioAPI): string | null {
   return $('h1').first().text().trim() || null;
 }
 
+/**
+ * Year from text that is already in the database rather than freshly fetched
+ * HTML. Same rules as the live path, so a backfill and a scrape agree — the
+ * only difference is the input, which lets listing_details.description be
+ * re-read without touching the network.
+ */
+export function extractYearFromStoredText(
+  description: string | null,
+  title: string | null,
+): number | null {
+  return extractYear(description ?? '', title);
+}
+
 function extractYear(labelText: string, title: string | null): number | null {
   for (const label of YEAR_LABELS) {
     const y = parseYearFromLabel(extractAfterLabel(labelText, label));
@@ -200,13 +213,36 @@ function parseKmValue(text: string | null): number | null {
   return Number.isFinite(n) && n >= 1000 && n <= 2_000_000 ? n : null;
 }
 
-// "Rok výroby: 10/2018" → 2018. "Rok výroby: model 2020" → 2020.
+/**
+ * "Rok výroby: 10/2018" → 2018, "model 2020" → 2020, and "r.v.: 12/22" → 2022.
+ *
+ * The two-digit form is the common one on Bazoš and was being dropped
+ * entirely — 4 779 cars carried a year nobody read. It has to be matched
+ * before the four-digit branch, because a value like "12/22, 1968cm³" also
+ * contains a plausible-looking four-digit number: engine displacement. 1968,
+ * 1984 and 2000 all pass a naive year check, so a mis-order here would not
+ * fail loudly, it would quietly file cars under the wrong decade.
+ */
 function parseYearFromLabel(s: string | null): number | null {
   if (!s) return null;
+  const max = new Date().getFullYear() + 1;
+
+  // MM/YY — anchored to the start so displacement further along cannot match.
+  const short = /^\s*(\d{1,2})\s*\/\s*(\d{2})(?!\d)/.exec(s);
+  if (short) {
+    const month = Number(short[1]);
+    const yy = Number(short[2]);
+    if (month >= 1 && month <= 12) {
+      // A two-digit year at or just past today reads as this century.
+      const year = yy <= (max % 100) ? 2000 + yy : 1900 + yy;
+      if (year >= 1980 && year <= max) return year;
+    }
+  }
+
   const m = /(?:\d{1,2}\s*\/\s*)?(\d{4})/.exec(s);
   if (!m) return null;
   const n = Number(m[1]);
-  return Number.isFinite(n) && n >= 1980 && n <= new Date().getFullYear() + 1 ? n : null;
+  return Number.isFinite(n) && n >= 1980 && n <= max ? n : null;
 }
 
 /**
