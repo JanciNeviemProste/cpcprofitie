@@ -108,6 +108,76 @@ export function pickClusterAlerts(report: DataQualityReport): ClusterAlert[] {
   return alerts;
 }
 
+export type SourceFreshness = {
+  source: string;
+  activeCanonical: number;
+  /** Share of active listings whose price was re-read inside the SLA. */
+  pctWithinSla: number;
+  slaDays: number;
+  p50AgeHours: number | null;
+  p90AgeHours: number | null;
+  oldestAgeDays: number | null;
+  neverCheckedPct: number;
+};
+
+/**
+ * How long a full sweep of a source should take, from the arithmetic rather
+ * than from observation.
+ *
+ * Deriving it matters. Today's freshness numbers look excellent — 97.7% of
+ * autobazar.eu seen within 24 hours — purely because the corpus was rebuilt by
+ * hand two days ago, and a threshold fitted to that would have been calibrated
+ * against an artefact. These figures come from the crawl budget: pages per run
+ * times runs per day against each source's page space, with headroom.
+ */
+export const SOURCE_SLA_DAYS: Record<string, number> = {
+  'bazos.sk': 4,
+  'autobazar.sk': 4,
+  'autobazar.eu': 6,
+};
+
+export const DEFAULT_SLA_DAYS = 5;
+
+export function slaDaysFor(source: string): number {
+  return SOURCE_SLA_DAYS[source] ?? DEFAULT_SLA_DAYS;
+}
+
+export type FreshnessAlert = {
+  source: string;
+  level: 'warn' | 'error';
+  reason: string;
+};
+
+/**
+ * Sources whose prices have gone stale.
+ *
+ * Measured as the share inside the SLA rather than as a median age, and the
+ * difference is not cosmetic: a median sits at "perfect" for days after a
+ * rebuild and then falls off a cliff, whereas the within-SLA share starts
+ * degrading in proportion on the first day the crawler falls behind. Only the
+ * second one is any use as an early warning.
+ */
+export function pickFreshnessAlerts(report: DataQualityReport): FreshnessAlert[] {
+  const alerts: FreshnessAlert[] = [];
+  for (const f of report.freshness) {
+    if (f.activeCanonical === 0) continue;
+    if (f.pctWithinSla < 80) {
+      alerts.push({
+        source: f.source,
+        level: 'error',
+        reason: `len ${f.pctWithinSla} % cien overených za ${f.slaDays} dní`,
+      });
+    } else if (f.pctWithinSla < 95) {
+      alerts.push({
+        source: f.source,
+        level: 'warn',
+        reason: `${f.pctWithinSla} % cien overených za ${f.slaDays} dní`,
+      });
+    }
+  }
+  return alerts;
+}
+
 export type EnrichmentCoverage = {
   source: string;
   active: number;
@@ -161,6 +231,7 @@ export type DataQualityReport = {
   enrichment: EnrichmentCoverage[];
   dealScore: DealScoreHealth;
   dedup: DedupHealth;
+  freshness: SourceFreshness[];
 };
 
 export function computeRepostPct(repostClones: number, total: number): number {
@@ -363,7 +434,50 @@ export async function getDataQualityReport(): Promise<DataQualityReport> {
       chainedClones: dr?.chained_clones ?? 0,
     };
 
-    return { ok: true, generatedAt, completeness, enrichment, dealScore, dedup };
+    // Freshness is measured on price_checked_at, never on last_seen_at:
+    // check-removed stamps last_seen_at after a HEAD request, which reads no
+    // price, so two of three sources would report perfect freshness while
+    // their prices went stale.
+    const freshRows = (await db.execute(sql`
+      SELECT l.source,
+        COUNT(*)::int AS active,
+        COUNT(*) FILTER (WHERE l.price_checked_at IS NULL)::int AS never_checked,
+        EXTRACT(EPOCH FROM percentile_cont(0.5) WITHIN GROUP (
+          ORDER BY now() - l.price_checked_at))/3600 AS p50_h,
+        EXTRACT(EPOCH FROM percentile_cont(0.9) WITHIN GROUP (
+          ORDER BY now() - l.price_checked_at))/3600 AS p90_h,
+        EXTRACT(EPOCH FROM max(now() - l.price_checked_at))/86400 AS oldest_d,
+        COUNT(*) FILTER (WHERE l.price_checked_at > now() - (
+          CASE l.source WHEN 'bazos.sk' THEN 4 WHEN 'autobazar.sk' THEN 4
+               WHEN 'autobazar.eu' THEN 6 ELSE 5 END * interval '1 day'))::int AS within_sla
+      FROM listings l
+      WHERE l.canonical_listing_id IS NULL
+        AND l.sold_at IS NULL
+        AND l.removed_at IS NULL
+      GROUP BY l.source
+    `)) as unknown as Array<{
+      source: string;
+      active: number;
+      never_checked: number;
+      p50_h: string | number | null;
+      p90_h: string | number | null;
+      oldest_d: string | number | null;
+      within_sla: number;
+    }>;
+    const num = (v: string | number | null) =>
+      v == null ? null : Math.round(Number(v) * 10) / 10;
+    const freshness: SourceFreshness[] = freshRows.map((r) => ({
+      source: r.source,
+      activeCanonical: r.active,
+      pctWithinSla: pct(r.within_sla, r.active),
+      slaDays: slaDaysFor(r.source),
+      p50AgeHours: num(r.p50_h),
+      p90AgeHours: num(r.p90_h),
+      oldestAgeDays: num(r.oldest_d),
+      neverCheckedPct: pct(r.never_checked, r.active),
+    }));
+
+    return { ok: true, generatedAt, completeness, enrichment, dealScore, dedup, freshness };
   } catch (e) {
     Sentry.captureException(e, { tags: { component: 'data-quality', step: 'getDataQualityReport' } });
     return {
@@ -384,6 +498,7 @@ export async function getDataQualityReport(): Promise<DataQualityReport> {
         incoherentClusters: 0,
         chainedClones: 0,
       },
+      freshness: [],
     };
   }
 }

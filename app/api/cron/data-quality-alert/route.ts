@@ -4,6 +4,7 @@ import {
   getDataQualityReport,
   pickClusterAlerts,
   pickDriftAlerts,
+  pickFreshnessAlerts,
 } from '@/lib/db/queries/data-quality';
 
 // Daily data-quality watchdog (08:00 UTC via vercel.json). Runs the read-only
@@ -56,6 +57,24 @@ export async function GET(request: Request) {
       );
     }
 
+    // Stale prices are a correctness failure that looks like nothing at all:
+    // the listings are still there, the dashboards still render, and the
+    // answers are quietly out of date. The crawler re-read 600 of 78 775
+    // listings per run for months and no signal anywhere said so.
+    const freshnessAlerts = pickFreshnessAlerts(report);
+    const staleErrors = freshnessAlerts.filter((a) => a.level === 'error');
+    if (staleErrors.length > 0) {
+      Sentry.captureMessage(
+        `Ceny starnú: ${staleErrors.map((a) => `${a.source} (${a.reason})`).join('; ')}`,
+        { level: 'error', tags: { component: 'data-quality-alert' }, extra: { freshnessAlerts } },
+      );
+    } else if (freshnessAlerts.length > 0) {
+      Sentry.captureMessage(
+        `Čerstvosť klesá: ${freshnessAlerts.map((a) => a.source).join(', ')}`,
+        { level: 'warning', tags: { component: 'data-quality-alert' }, extra: { freshnessAlerts } },
+      );
+    }
+
     const alerts = pickDriftAlerts(report);
     const drift = alerts.filter((a) => a.health === 'drift');
 
@@ -75,6 +94,8 @@ export async function GET(request: Request) {
     return NextResponse.json({
       runAt: new Date(report.generatedAt).toISOString(),
       driftCount: drift.length,
+      freshness: report.freshness,
+      freshnessAlerts,
       warnCount: alerts.length - drift.length,
       alerts,
       elapsedMs: Date.now() - startedAt,

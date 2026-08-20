@@ -4,6 +4,7 @@ import {
   computeRepostPct,
   pickClusterAlerts,
   pickDriftAlerts,
+  pickFreshnessAlerts,
   toPublicDataHealth,
   type DataQualityReport,
 } from '../data-quality';
@@ -57,6 +58,7 @@ function report(
       incoherentClusters: 0,
       chainedClones: 0,
     },
+    freshness: [],
   };
 }
 
@@ -116,6 +118,7 @@ describe('toPublicDataHealth', () => {
         incoherentClusters: 0,
         chainedClones: 0,
       },
+      freshness: [],
     };
   }
 
@@ -177,6 +180,7 @@ describe('pickClusterAlerts', () => {
       incoherentClusters: 0,
       chainedClones: 0,
     },
+    freshness: [],
   };
 
   it('stays quiet when nothing contradicts itself', () => {
@@ -206,5 +210,53 @@ describe('pickClusterAlerts', () => {
     // dashboard for weeks and told nobody anything. The invariants are what
     // separate "large" from "impossible".
     expect(pickClusterAlerts({ ...base, dedup: { ...base.dedup, maxClusterSize: 40 } })).toEqual([]);
+  });
+});
+
+describe('pickFreshnessAlerts', () => {
+  const fresh = (source: string, pctWithinSla: number) => ({
+    source,
+    activeCanonical: 1000,
+    pctWithinSla,
+    slaDays: 4,
+    p50AgeHours: 20,
+    p90AgeHours: 60,
+    oldestAgeDays: 3,
+    neverCheckedPct: 0,
+  });
+  const withFreshness = (rows: ReturnType<typeof fresh>[]): DataQualityReport => ({
+    ...report([]),
+    freshness: rows,
+  });
+
+  it('stays quiet while prices are being re-read', () => {
+    expect(pickFreshnessAlerts(withFreshness([fresh('bazos.sk', 98)]))).toEqual([]);
+  });
+
+  it('warns before it is a crisis', () => {
+    const a = pickFreshnessAlerts(withFreshness([fresh('bazos.sk', 90)]));
+    expect(a).toHaveLength(1);
+    expect(a[0]!.level).toBe('warn');
+  });
+
+  it('escalates when most prices are stale', () => {
+    const a = pickFreshnessAlerts(withFreshness([fresh('autobazar.eu', 41)]));
+    expect(a[0]!.level).toBe('error');
+  });
+
+  it('says nothing about a source with no listings', () => {
+    // An empty source is a different problem, and reporting 0% freshness for it
+    // would bury the sources that actually have prices going stale.
+    expect(
+      pickFreshnessAlerts(withFreshness([{ ...fresh('bazos.sk', 0), activeCanonical: 0 }])),
+    ).toEqual([]);
+  });
+
+  it('judges each source on its own', () => {
+    const a = pickFreshnessAlerts(
+      withFreshness([fresh('bazos.sk', 99), fresh('autobazar.eu', 12)]),
+    );
+    expect(a).toHaveLength(1);
+    expect(a[0]!.source).toBe('autobazar.eu');
   });
 });
