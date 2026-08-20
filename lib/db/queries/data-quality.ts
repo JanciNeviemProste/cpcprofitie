@@ -111,7 +111,9 @@ export function pickClusterAlerts(report: DataQualityReport): ClusterAlert[] {
 export type SourceFreshness = {
   source: string;
   activeCanonical: number;
-  /** Share of active listings whose price was re-read inside the SLA. */
+  /** Of active listings that have a price, the share re-read inside the SLA.
+   *  Rows without a price are excluded: they have no price to go stale, and
+   *  including them would pin the alert on a completeness problem. */
   pctWithinSla: number;
   slaDays: number;
   p50AgeHours: number | null;
@@ -454,6 +456,13 @@ export async function getDataQualityReport(): Promise<DataQualityReport> {
       WHERE l.canonical_listing_id IS NULL
         AND l.sold_at IS NULL
         AND l.removed_at IS NULL
+        -- Only rows that have a price. A listing with no price cannot have a
+        -- stale one, and counting it here would hold bazos.sk permanently red
+        -- over a coverage problem — an alert nobody can ever clear is one
+        -- people learn to ignore, which is the failure this metric exists to
+        -- prevent. Rows without a price are a completeness question, and
+        -- completeness already reports them.
+        AND l.price_eur IS NOT NULL
       GROUP BY l.source
     `)) as unknown as Array<{
       source: string;
