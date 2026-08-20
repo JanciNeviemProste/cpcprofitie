@@ -1,4 +1,4 @@
-// Weekly market snapshot computation. For each (model, region, year-bucket,
+// Weekly market snapshot computation. For each (model, year-bucket,
 // mileage-bucket) cohort, computes price percentiles + sold/active counts +
 // days-to-sell. Stored in market_snapshots so the dashboard can render
 // trajectories without hitting the raw listings table on every render.
@@ -25,7 +25,8 @@ export { isoWeekStart };
 /**
  * Compute weekly snapshots for the current ISO week. Idempotent: re-running
  * for the same week overwrites the cohort's stats (PK is
- * model/region/year-bucket/mileage-bucket/period/captured-on).
+ * model/region/year-bucket/mileage-bucket/period/captured-on, with region
+ * always written as 'all' — see the note on the query below).
  *
  * Minimum cohort size: 3 listings. Below that, the snapshot is skipped — the
  * numbers would be noise. The UI filters by cohort size.
@@ -46,13 +47,24 @@ export async function computeWeeklySnapshots(
   const weekStartLit = `'${weekStart.toISOString()}'::timestamptz`;
   const db = getDb();
 
-  // One big SQL: group canonical listings by (model, region, year-bucket,
+  // One big SQL: group canonical listings by (model, year-bucket,
   // mileage-bucket) and pull the prices + days-listed arrays into JS so
   // computeSnapshot() (already unit-tested) does the actual math.
+  //
+  // Region is deliberately NOT a grouping dimension. Splitting by kraj left an
+  // average of 1.5 cars per cohort — 38 961 cohorts of which only 1 255 held
+  // five or more, covering 10 618 cars. Dropping it gives 6 821 cohorts, 2 429
+  // usable, covering 51 535 — five times the coverage from the same data.
+  // Used-car prices do not vary between kraje enough to pay for that, and the
+  // Danish listings this gets compared against carry no region at all.
+  //
+  // The column stays and is written as 'all': it is part of the primary key
+  // (migration 0002), and 'all' states plainly that the row is nationwide.
+  // Region remains available as a filter in the UI, it just no longer splits
+  // the cohort a median is computed from.
   const rows = (await db.execute(sql`
     SELECT
       l.model_id,
-      coalesce(l.region, 'unknown-region') AS region,
       CASE
         WHEN l.year IS NULL THEN 'unknown'
         WHEN l.year >= 2020 THEN '2020+'
@@ -81,7 +93,7 @@ export async function computeWeeklySnapshots(
     FROM listings l
     WHERE l.model_id IS NOT NULL
       AND l.canonical_listing_id IS NULL
-    GROUP BY 1, 2, 3, 4
+    GROUP BY 1, 2, 3
     HAVING COUNT(*) FILTER (
       WHERE l.sold_at IS NULL
         AND l.removed_at IS NULL
@@ -89,7 +101,6 @@ export async function computeWeeklySnapshots(
     ) >= ${minCohortSize}
   `)) as unknown as Array<{
     model_id: number;
-    region: string;
     year_bucket: string;
     mileage_bucket: string;
     active_prices: unknown;
@@ -116,7 +127,7 @@ export async function computeWeeklySnapshots(
 
     valuesToUpsert.push({
       modelId: row.model_id,
-      region: row.region,
+      region: 'all',
       yearBucket: row.year_bucket,
       mileageBucket: row.mileage_bucket,
       period: 'week',
@@ -186,11 +197,13 @@ export function toNumberArray(value: unknown): number[] {
     : typeof value === 'string'
       ? value.replace(/^{|}$/g, '').split(',')
       : [];
-  return raw
-    .map((v) => (typeof v === 'number' ? v : String(v).trim()))
-    // "{}" splits to [""] and Number("") is 0, not NaN — an empty aggregate
-    // would otherwise become a single zero-day sale.
-    .filter((v) => v !== '' && v !== 'NULL')
-    .map((v) => (typeof v === 'number' ? v : Number(v)))
-    .filter((n) => Number.isFinite(n));
+  return (
+    raw
+      .map((v) => (typeof v === 'number' ? v : String(v).trim()))
+      // "{}" splits to [""] and Number("") is 0, not NaN — an empty aggregate
+      // would otherwise become a single zero-day sale.
+      .filter((v) => v !== '' && v !== 'NULL')
+      .map((v) => (typeof v === 'number' ? v : Number(v)))
+      .filter((n) => Number.isFinite(n))
+  );
 }
