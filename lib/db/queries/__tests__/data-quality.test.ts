@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assessHealthForTest,
   computeRepostPct,
+  pickClusterAlerts,
   pickDriftAlerts,
   toPublicDataHealth,
   type DataQualityReport,
@@ -52,6 +53,9 @@ function report(
       vinCoveragePct: 0,
       maxClusterSize: 0,
       crossSourceVinClusters: 0,
+      vinConflictClusters: 0,
+      incoherentClusters: 0,
+      chainedClones: 0,
     },
   };
 }
@@ -108,6 +112,9 @@ describe('toPublicDataHealth', () => {
         vinCoveragePct: 0,
         maxClusterSize: 0,
         crossSourceVinClusters: 0,
+        vinConflictClusters: 0,
+        incoherentClusters: 0,
+        chainedClones: 0,
       },
     };
   }
@@ -148,5 +155,56 @@ describe('computeRepostPct', () => {
 
   it('is 0 for an empty corpus (no divide-by-zero)', () => {
     expect(computeRepostPct(0, 0)).toBe(0);
+  });
+});
+
+describe('pickClusterAlerts', () => {
+  const base = {
+    ok: true as const,
+    generatedAt: new Date(0).toISOString(),
+    completeness: [],
+    enrichment: [],
+    dealScore: { activeCanonical: 0, flipRows: 0, withDealScore: 0, avgCohortSize: null },
+    dedup: {
+      total: 100,
+      canonical: 100,
+      repostClones: 0,
+      repostPct: 0,
+      vinCoveragePct: 0,
+      maxClusterSize: 0,
+      crossSourceVinClusters: 0,
+      vinConflictClusters: 0,
+      incoherentClusters: 0,
+      chainedClones: 0,
+    },
+  };
+
+  it('stays quiet when nothing contradicts itself', () => {
+    expect(pickClusterAlerts(base)).toEqual([]);
+  });
+
+  it('reports a single different VIN in a cluster', () => {
+    // Not a threshold: two VINs are two cars, so one is already a defect.
+    const alerts = pickClusterAlerts({
+      ...base,
+      dedup: { ...base.dedup, vinConflictClusters: 1 },
+    });
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]!.count).toBe(1);
+  });
+
+  it('reports chains and incoherent clusters separately', () => {
+    const alerts = pickClusterAlerts({
+      ...base,
+      dedup: { ...base.dedup, chainedClones: 35, incoherentClusters: 23 },
+    });
+    expect(alerts.map((a) => a.count)).toEqual([35, 23]);
+  });
+
+  it('does not fire on a large but coherent cluster', () => {
+    // A big cluster is not by itself wrong — maxClusterSize sat at 682 on the
+    // dashboard for weeks and told nobody anything. The invariants are what
+    // separate "large" from "impossible".
+    expect(pickClusterAlerts({ ...base, dedup: { ...base.dedup, maxClusterSize: 40 } })).toEqual([]);
   });
 });

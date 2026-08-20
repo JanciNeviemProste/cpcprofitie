@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
-import { getDataQualityReport, pickDriftAlerts } from '@/lib/db/queries/data-quality';
+import {
+  getDataQualityReport,
+  pickClusterAlerts,
+  pickDriftAlerts,
+} from '@/lib/db/queries/data-quality';
 
 // Daily data-quality watchdog (08:00 UTC via vercel.json). Runs the read-only
 // data-quality report and raises a Sentry warning when any source's key-field
@@ -40,6 +44,18 @@ export async function GET(request: Request) {
         { status: 500 },
       );
     }
+    // Dedup defects are reported at error level, not warning. Selector drift
+    // makes new rows worse; a false merge makes existing rows disappear from
+    // the market, and nothing notices because the listings still exist. 13 631
+    // of them were hidden for weeks while every dashboard read green.
+    const clusterAlerts = pickClusterAlerts(report);
+    if (clusterAlerts.length > 0) {
+      Sentry.captureMessage(
+        `Dedup poškodený: ${clusterAlerts.map((a) => `${a.reason} (${a.count})`).join('; ')}`,
+        { level: 'error', tags: { component: 'data-quality-alert' }, extra: { clusterAlerts } },
+      );
+    }
+
     const alerts = pickDriftAlerts(report);
     const drift = alerts.filter((a) => a.health === 'drift');
 

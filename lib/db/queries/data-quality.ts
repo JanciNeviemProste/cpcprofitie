@@ -77,6 +77,37 @@ export function pickDriftAlerts(report: DataQualityReport): DriftAlert[] {
     }));
 }
 
+export type ClusterAlert = { reason: string; count: number };
+
+/**
+ * Cluster shapes that a genuine repost group cannot have.
+ *
+ * A threshold on maxClusterSize alone would not have helped: it stood at 682 on
+ * the admin page for weeks and nobody looked. These are different in kind —
+ * each one is a contradiction rather than a large number, so any value above
+ * zero is a defect that can be named and found.
+ */
+export function pickClusterAlerts(report: DataQualityReport): ClusterAlert[] {
+  const d = report.dedup;
+  const alerts: ClusterAlert[] = [];
+  if (d.vinConflictClusters > 0) {
+    alerts.push({
+      reason: 'zhluky s dvoma a viac rôznymi VIN (dve VIN = dve autá)',
+      count: d.vinConflictClusters,
+    });
+  }
+  if (d.chainedClones > 0) {
+    alerts.push({ reason: 'klony ukazujúce na klon (skrytá hlava zhluku)', count: d.chainedClones });
+  }
+  if (d.incoherentClusters > 0) {
+    alerts.push({
+      reason: 'zhluky miešajúce modely, ročníky nad 2 roky alebo ceny nad 3×',
+      count: d.incoherentClusters,
+    });
+  }
+  return alerts;
+}
+
 export type EnrichmentCoverage = {
   source: string;
   active: number;
@@ -104,6 +135,18 @@ export type DedupHealth = {
   maxClusterSize: number;
   // VINs seen on 2+ sources — the same car cross-posted, deduped by the VIN pass.
   crossSourceVinClusters: number;
+  // Clusters holding two or more different VINs. A VIN identifies a physical
+  // car, so this is not a heuristic: any value above zero is a proven false
+  // merge. It reached 515 once, the worst cluster holding 151 distinct VINs.
+  vinConflictClusters: number;
+  // Clusters that contradict themselves: more than one model, a year span over
+  // two, or a top price more than three times the bottom. A genuine repost
+  // cluster trips none of these; the 681-Octavia group tripped all three.
+  incoherentClusters: number;
+  // Clones pointing at a canonical that is itself a clone. Every consumer reads
+  // "canonical_listing_id IS NULL" as canonical, so the middle of a chain is
+  // invisible and its clones are hidden behind it.
+  chainedClones: number;
 };
 
 export type DataQualityReport = {
@@ -276,7 +319,24 @@ export async function getDataQualityReport(): Promise<DataQualityReport> {
           SELECT d2.vin FROM listing_details d2 JOIN listings l2 ON l2.id = d2.listing_id
           WHERE d2.vin IS NOT NULL AND LENGTH(d2.vin) = 17
           GROUP BY d2.vin HAVING COUNT(DISTINCT l2.source) > 1
-        ) x)::int AS cross_source_vin
+        ) x)::int AS cross_source_vin,
+        (SELECT COUNT(*) FROM (
+          SELECT l3.canonical_listing_id
+          FROM listings l3 JOIN listing_details d3 ON d3.listing_id = l3.id
+          WHERE l3.canonical_listing_id IS NOT NULL
+            AND d3.vin IS NOT NULL AND LENGTH(d3.vin) = 17
+          GROUP BY l3.canonical_listing_id HAVING COUNT(DISTINCT d3.vin) > 1
+        ) v)::int AS vin_conflict_clusters,
+        (SELECT COUNT(*) FROM (
+          SELECT canonical_listing_id FROM listings
+          WHERE canonical_listing_id IS NOT NULL
+          GROUP BY canonical_listing_id
+          HAVING COUNT(DISTINCT model_id) > 1
+              OR MAX(year) - MIN(year) > 2
+              OR MAX(price_eur) > 3 * NULLIF(MIN(price_eur), 0)
+        ) i)::int AS incoherent_clusters,
+        (SELECT COUNT(*) FROM listings l4 JOIN listings c4 ON c4.id = l4.canonical_listing_id
+          WHERE c4.canonical_listing_id IS NOT NULL)::int AS chained_clones
     `)) as unknown as Array<{
       total: number;
       canonical: number;
@@ -284,6 +344,9 @@ export async function getDataQualityReport(): Promise<DataQualityReport> {
       with_vin: number;
       max_cluster_clones: number;
       cross_source_vin: number;
+      vin_conflict_clusters: number;
+      incoherent_clusters: number;
+      chained_clones: number;
     }>;
     const dr = dedupRows[0];
     const dedup: DedupHealth = {
@@ -295,6 +358,9 @@ export async function getDataQualityReport(): Promise<DataQualityReport> {
       // +1 so the count includes the canonical itself (cluster = canonical + clones).
       maxClusterSize: (dr?.max_cluster_clones ?? 0) > 0 ? (dr?.max_cluster_clones ?? 0) + 1 : 0,
       crossSourceVinClusters: dr?.cross_source_vin ?? 0,
+      vinConflictClusters: dr?.vin_conflict_clusters ?? 0,
+      incoherentClusters: dr?.incoherent_clusters ?? 0,
+      chainedClones: dr?.chained_clones ?? 0,
     };
 
     return { ok: true, generatedAt, completeness, enrichment, dealScore, dedup };
@@ -314,6 +380,9 @@ export async function getDataQualityReport(): Promise<DataQualityReport> {
         vinCoveragePct: 0,
         maxClusterSize: 0,
         crossSourceVinClusters: 0,
+        vinConflictClusters: 0,
+        incoherentClusters: 0,
+        chainedClones: 0,
       },
     };
   }
