@@ -51,14 +51,17 @@ export async function unmergeFalseClusters(
   const stats: UnmergeStats = { scanned: 0, unmerged: 0, dryRun, nextCursor: null };
 
   try {
-    // A pair is a false merge when the two rows' current fingerprints differ
-    // AND no shared VIN vouches for them. The VIN check is what keeps this from
-    // undoing pass 1's work: a VIN match is direct evidence of one physical
-    // car, and outranks any disagreement between two hashes.
+    // The question is not "is this pair wrong" but "what still justifies it".
+    // A merge survives only if a shared VIN vouches for it — direct evidence of
+    // one physical car, which outranks everything — or both rows carry the same
+    // non-null fingerprint. Everything else goes.
     //
-    // IS DISTINCT FROM, not <>: a clone with NULL fingerprint and a canonical
-    // with one is exactly the case this is here for, and <> would call that
-    // unknown and skip it.
+    // Stating it that way round matters. The first version asked whether the
+    // fingerprints were `IS DISTINCT FROM` each other, and two NULLs are not
+    // distinct, so 7 660 merges survived — including the 681-Octavia group,
+    // whose members had just had their meaningless fingerprints cleared. A row
+    // with no identity cannot be shown to be a duplicate of anything; absence
+    // of evidence on both sides is not evidence of sameness.
     const rows = (await db.execute(sql`
       SELECT
         l.id AS clone_id,
@@ -71,7 +74,11 @@ export async function unmergeFalseClusters(
         c.year AS canonical_year
       FROM listings l
       JOIN listings c ON c.id = l.canonical_listing_id
-      WHERE l.fingerprint IS DISTINCT FROM c.fingerprint
+      WHERE NOT (
+          l.fingerprint IS NOT NULL
+          AND c.fingerprint IS NOT NULL
+          AND l.fingerprint = c.fingerprint
+        )
         AND NOT EXISTS (
           SELECT 1
           FROM listing_details d1
