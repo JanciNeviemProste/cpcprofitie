@@ -68,14 +68,20 @@ export async function POST(request: Request) {
   // still missing a price / model (backfill); default 'unenriched' keeps the
   // normal first-pass flow.
   const mode: EnrichSelectMode =
-    payload.mode === 'null-price'
+    payload.mode === 'null-description'
+      ? 'null-description'
+      : payload.mode === 'null-price'
       ? 'null-price'
       : payload.mode === 'null-model'
         ? 'null-model'
         : payload.mode === 'unenriched-newest'
           ? 'unenriched-newest'
           : 'unenriched';
-  const isBackfill = mode === 'null-price' || mode === 'null-model';
+  // Cursor-driven modes: rows that stay NULL even after a successful fetch
+  // (gone pages, adverts with no price) sit at the head of the set and would
+  // be re-fetched on every invocation without one.
+  const isBackfill =
+    mode === 'null-price' || mode === 'null-model' || mode === 'null-description';
   // Cursor carried across invocations so the driver walks the whole backfill
   // set once. Without it, rows that stay NULL after enrichment (Cena dohodou,
   // gone) sit at the head and every invocation re-fetches them → livelock.

@@ -9,7 +9,7 @@
 //                            detail page for old rows scraped before the
 //                            listing-page parser extracted price.
 
-import { and, desc, eq, gt, isNull, notExists, sql } from 'drizzle-orm';
+import { and, desc, eq, exists, gt, isNull, notExists, sql } from 'drizzle-orm';
 import { getDb } from '../db';
 import { listingDetails, listings } from '../db/schema';
 import type { NormalizedListing, Source } from './types';
@@ -18,6 +18,7 @@ export type PartitionOpts = { index: number; modulo: number };
 export type EnrichSelectMode =
   | 'unenriched'
   | 'unenriched-newest'
+  | 'null-description'
   | 'null-price'
   | 'null-model';
 
@@ -41,8 +42,28 @@ export async function loadUnenrichedBatch(
     partition && partition.modulo > 1
       ? sql`(${listings.id} % ${partition.modulo}) = ${partition.index}`
       : undefined;
+  // A detail row exists but carries no description: these came in through the
+  // sitemap import, which created the row without ever fetching the page. The
+  // 'unenriched' mode cannot see them, because it asks whether a detail row
+  // exists at all — 8 568 autobazar.eu listings were therefore permanently
+  // invisible to enrichment, missing VIN, power and seller.
+  const nullDescriptionFilter = and(
+    isNull(listings.canonicalListingId),
+    isNull(listings.soldAt),
+    isNull(listings.removedAt),
+    afterId != null ? gt(listings.id, afterId) : undefined,
+    exists(
+      db
+        .select({ x: sql`1` })
+        .from(listingDetails)
+        .where(and(eq(listingDetails.listingId, listings.id), isNull(listingDetails.description))),
+    ),
+  );
+
   const selectFilter =
-    mode === 'null-price' || mode === 'null-model'
+    mode === 'null-description'
+      ? nullDescriptionFilter
+      : mode === 'null-price' || mode === 'null-model'
       ? and(
           // The target-column IS NULL among active listings, walked by an id
           // cursor so rows that stay NULL even after enrichment (e.g. gone)
