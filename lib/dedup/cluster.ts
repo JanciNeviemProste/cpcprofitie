@@ -143,6 +143,12 @@ export async function clusterReposts(opts: {
         AND l.model_id IS NOT NULL
         AND EXISTS (SELECT 1 FROM listing_photos p WHERE p.listing_id = l.id)
         AND l.fingerprint NOT IN (SELECT fingerprint FROM vin_conflicts)
+        -- A row that already heads a cluster is not available to be merged into
+        -- someone else's. Without this, pass 2 demotes a VIN canonical into a
+        -- fingerprint cluster, its own VIN clones are left pointing at a clone,
+        -- and pass 3 frees them — 35 rows were assigned and freed again on every
+        -- single run, each cycle writing to the database and none of it settling.
+        AND NOT EXISTS (SELECT 1 FROM ${listings} k WHERE k.canonical_listing_id = l.id)
       GROUP BY l.fingerprint
       HAVING COUNT(*) > 1
     ),
