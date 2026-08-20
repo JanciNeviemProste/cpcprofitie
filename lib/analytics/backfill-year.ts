@@ -90,7 +90,7 @@ export async function backfillYear(
           id: idStr,
           title: r.raw_title,
           year,
-          snippet: r.description.replace(/s+/g, ' ').slice(0, 120),
+          snippet: r.description.replace(/\s+/g, ' ').slice(0, 120),
         });
       }
     }
