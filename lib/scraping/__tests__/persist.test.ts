@@ -11,6 +11,8 @@ const state = {
   /** Number of leading insert attempts that should fail on the primary key. */
   pkFailures: 0,
   inserts: 0,
+  /** The SET clause of the last onConflictDoUpdate, for the erasure guard. */
+  lastConflictSet: null as Record<string, unknown> | null,
 };
 
 function thenable() {
@@ -43,9 +45,13 @@ vi.mock('@/lib/db', () => ({
           }
           return Promise.resolve([]);
         },
-        onConflictDoUpdate: () => ({
-          returning: () => (state.fail ? Promise.reject(state.fail) : Promise.resolve([])),
-        }),
+        onConflictDoUpdate: (cfg: { set?: Record<string, unknown> }) => {
+          state.lastConflictSet = cfg?.set ?? null;
+          return {
+            returning: () =>
+              state.fail ? Promise.reject(state.fail) : Promise.resolve([]),
+          };
+        },
       }),
     }),
   }),
@@ -201,5 +207,39 @@ describe('model id collides with an unrelated row', () => {
     state.pkFailures = 9999; // every candidate id taken
     await expect(upsertListings(ROWS.slice(0, 1))).resolves.toBeDefined();
     expect(state.inserts).toBeLessThan(40);
+  });
+});
+
+describe('upsertListings — a re-scrape must not erase what a detail page found', () => {
+  /** Renders a drizzle SQL fragment down to the text it will emit. */
+  function sqlText(v: unknown): string {
+    const chunks = (v as { queryChunks?: unknown[] })?.queryChunks;
+    if (!Array.isArray(chunks)) return String(v);
+    return chunks
+      .map((c) => (typeof c === 'object' && c !== null && 'value' in c ? String((c as { value: unknown }).value) : ''))
+      .join('');
+  }
+
+  it('coalesces every field that describes the car, and only those', () => {
+    // bazoš list pages carry a truncated snippet, so a re-scrape produces null
+    // for fields the detail page had filled. Before this guard, each pass wiped
+    // roughly 2 100 years and 2 100 mileages, and region for 99.4% of the
+    // source — which bazos-sk.ts:99 hardcodes to null because its list page has
+    // no location at all.
+    const set = state.lastConflictSet;
+    expect(set).not.toBeNull();
+    for (const field of ['year', 'mileageKm', 'fuel', 'transmission', 'region', 'modelId']) {
+      expect(sqlText(set![field]), `${field} must not be overwritten with null`).toContain(
+        'coalesce',
+      );
+    }
+  });
+
+  it('still lets a new price win outright', () => {
+    // Price is the one field here that is genuinely mutable, and a seller
+    // dropping it is the event the whole product exists to detect. Coalescing
+    // it would pin a stale asking price on a "Cena dohodou" advert with nothing
+    // to ever clear it — and that price feeds the cohort medians.
+    expect(sqlText(state.lastConflictSet!.priceEur)).not.toContain('coalesce');
   });
 });
