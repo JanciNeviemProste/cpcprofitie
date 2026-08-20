@@ -165,15 +165,26 @@ export function parseDetailPage(html: string, listing: NormalizedListing): Norma
 // which on the Ford sample said 2020 while the car was first registered 11/2019.
 // 'r.v' is listed without its dot because sellers write it every way there is —
 // "r.v.", "r.v:", "r.v 2022/4", even "r.v11/2022" with nothing between at all.
-const YEAR_LABELS = [
+// Year labels are patterns, not literals, because "r.v." is written every way
+// a keyboard allows: "r.v.", "r. v.", "rv.", "rv", and "r.v11/2022" with
+// nothing after it at all. Matching them as fixed strings recovered 18% of the
+// missing years; the descriptions carry one in roughly half.
+//
+// The registration forms need a leading word boundary — without one the "rv"
+// pattern matches inside ordinary words ("servisná"), and a label that matches
+// anywhere will read whatever number happens to follow it.
+//
+// Order is significance: a registration date beats "MODEL", which on the Ford
+// sample said 2020 while the car was first registered 11/2019.
+const YEAR_LABEL_PATTERNS = [
   'Rok výroby',
-  'r.v',
+  '\\bro[cč]n[ií]k',
+  '\\br\\.?\\s*v\\.?',
   'Prvá evidencia',
-  '1. evidencia',
-  'registrácia',
-  'registracia',
-  'Rok',
-  'MODEL',
+  '1\\. evidencia',
+  'registr[aá]ci[ae]',
+  '\\bRok',
+  '\\bMODEL',
 ];
 
 function rawTitleForYear($: cheerio.CheerioAPI): string | null {
@@ -194,8 +205,8 @@ export function extractYearFromStoredText(
 }
 
 function extractYear(labelText: string, title: string | null): number | null {
-  for (const label of YEAR_LABELS) {
-    const y = parseYearFromLabel(extractAfterLabel(labelText, label));
+  for (const pattern of YEAR_LABEL_PATTERNS) {
+    const y = parseYearFromLabel(extractAfterPattern(labelText, pattern));
     if (y != null) return y;
   }
   // Titles often carry it: "Citroen C3 1.5 BlueHDi 75 kw - 2023 - odpočet DPH".
@@ -288,13 +299,18 @@ function boundedLabel(text: string, label: string, maxLen: number): string | nul
 }
 
 function extractAfterLabel(text: string, label: string): string | null {
+  return extractAfterPattern(text, escapeRe(label));
+}
+
+/** As above, but the label is already a regex — see YEAR_LABEL_PATTERNS. */
+function extractAfterPattern(text: string, labelPattern: string): string | null {
   // The gap between a label and its value is whatever the seller typed:
   // "r.v.: 12/22", "r.v 2022/4", "Rok výroby:18.1.2023", or nothing at all
   // in "r.v11/2022". Consuming all of it matters because parseYearFromLabel
   // anchors its patterns to the start of the value — a leading ".:" left
   // behind would push every date shape out of reach and fall through to the
   // catch-all, which is exactly the branch that reads engine displacement.
-  const re = new RegExp(`${escapeRe(label)}[\\s:.-]*([^\\n,;]+?)(?:\\s{2,}|\\n|,|;|$)`, 'i');
+  const re = new RegExp(`${labelPattern}[\\s:.-]*([^\\n,;]+?)(?:\\s{2,}|\\n|,|;|$)`, 'i');
   const m = re.exec(text);
   return m?.[1]?.trim() ?? null;
 }

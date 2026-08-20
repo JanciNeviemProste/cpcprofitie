@@ -20,6 +20,11 @@ export type BackfillYearStats = {
   updated: number;
   remaining: number;
   dryRun: boolean;
+  /** Only on a dry run: what the extractor read, and the text it read it from.
+   *  A year is written once and never revisited, so a format misread quietly
+   *  files thousands of cars under the wrong decade — this makes the result
+   *  checkable before anything is committed. */
+  sample?: Array<{ id: string; title: string | null; year: number; snippet: string }>;
   /** Highest id scanned this call. Pass back as `afterId` to continue — rows
    *  whose text carries no year stay NULL and would otherwise be re-scanned
    *  from the top forever (remaining never reaches 0). */
@@ -68,6 +73,7 @@ export async function backfillYear(
     // Group ids by year so one UPDATE covers every listing of that year rather
     // than one statement per row.
     const byYear = new Map<number, string[]>();
+    const sample: NonNullable<BackfillYearStats['sample']> = [];
     for (const r of rows) {
       const year = extractYearFromStoredText(r.description, r.raw_title);
       if (year == null) continue;
@@ -76,7 +82,19 @@ export async function backfillYear(
       const arr = byYear.get(year) ?? [];
       arr.push(idStr);
       byYear.set(year, arr);
+      // Spread across the batch rather than taking the first 25: the head of a
+      // page tends to be one dealer's listings, all in the same format, which
+      // would make any sample look unanimous.
+      if (dryRun && stats.resolved % 40 === 1 && sample.length < 25) {
+        sample.push({
+          id: idStr,
+          title: r.raw_title,
+          year,
+          snippet: r.description.replace(/s+/g, ' ').slice(0, 120),
+        });
+      }
     }
+    if (dryRun) stats.sample = sample;
 
     if (!dryRun) {
       for (const [year, ids] of byYear) {

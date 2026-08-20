@@ -260,3 +260,32 @@ describe('bazos.sk detail — the year formats sellers actually write', () => {
     expect(parse('Rok výroby: 5.20.2021')).toBe(2021);
   });
 });
+
+describe('bazos.sk detail — "r.v." spelled every way there is', () => {
+  function parse(text: string) {
+    const html = `<html><body><div class="popisdetail">${text}</div></body></html>`;
+    return parseDetailPage(html, stub('1', 'https://auto.bazos.sk/inzerat/1/x.php'))
+      .listingOverrides?.year;
+  }
+
+  it('reads the dotless and spaced spellings', () => {
+    expect(parse('R.v 2013, najazdené 247tis km')).toBe(2013);
+    expect(parse('Manualna 5stupnova prevodovka, rv. 2013')).toBe(2013);
+    expect(parse('Renault Master,2.5dci,rv2004,naj.146tis')).toBe(2004);
+    expect(parse('rv.6/2015 avantgarde vybava')).toBe(2015);
+    expect(parse('r. v. 2019 – spoľahlivé kombi')).toBe(2019);
+    expect(parse('Technické údaje r. v. : 05/17, 3956cm³')).toBe(2017);
+  });
+
+  it('reads ročník', () => {
+    expect(parse('Peugeot 207, rocnik 2011, karoseria hatchback')).toBe(2011);
+    expect(parse('ročník 2011')).toBe(2011);
+  });
+
+  it('does not find a year inside an ordinary word', () => {
+    // "servisná" contains "rv". A label that matches mid-word would read the
+    // next number it sees — here a service interval, not a year.
+    expect(parse('servisná prehliadka po 2000 km')).toBeUndefined();
+    expect(parse('rezervné koleso, výbava 2000 W audio')).toBeUndefined();
+  });
+});
