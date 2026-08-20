@@ -19,7 +19,7 @@ if (!m) {
 const secret = m[1].replace(/^["']|["']$/g, '');
 const BASE = 'https://cpcprofitie.vercel.app/api/cron/dispatch-scrape';
 
-const SOURCES = ['bazos.sk', 'autobazar.sk', 'autobazar.eu'];
+const SOURCES = (process.env.SOURCES ?? 'bazos.sk,autobazar.sk,autobazar.eu').split(',');
 const PAGES = Number(process.env.PAGES ?? '80');
 const HOURS = Number(process.env.HOURS ?? '3');
 const deadline = Date.now() + HOURS * 3600_000;
