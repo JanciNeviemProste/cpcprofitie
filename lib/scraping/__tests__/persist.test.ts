@@ -5,7 +5,13 @@ const captureException = vi.fn();
 vi.mock('@sentry/nextjs', () => ({ captureException: (...a: unknown[]) => captureException(...a) }));
 
 // Counts every query the persist layer attempts, and controls whether it fails.
-const state = { selects: 0, fail: null as Error | null };
+const state = {
+  selects: 0,
+  fail: null as Error | null,
+  /** Number of leading insert attempts that should fail on the primary key. */
+  pkFailures: 0,
+  inserts: 0,
+};
 
 function thenable() {
   state.selects++;
@@ -25,7 +31,18 @@ vi.mock('@/lib/db', () => ({
     select: () => thenable(),
     insert: () => ({
       values: () => ({
-        onConflictDoNothing: () => (state.fail ? Promise.reject(state.fail) : Promise.resolve([])),
+        onConflictDoNothing: () => {
+          state.inserts++;
+          if (state.fail) return Promise.reject(state.fail);
+          if (state.inserts <= state.pkFailures) {
+            return Promise.reject(
+              Object.assign(new Error('duplicate key value violates unique constraint'), {
+                code: '23505',
+              }),
+            );
+          }
+          return Promise.resolve([]);
+        },
         onConflictDoUpdate: () => ({
           returning: () => (state.fail ? Promise.reject(state.fail) : Promise.resolve([])),
         }),
@@ -64,6 +81,8 @@ beforeEach(() => {
   process.env.DATABASE_URL = 'postgres://localhost/test';
   state.selects = 0;
   state.fail = null;
+  state.pkFailures = 0;
+  state.inserts = 0;
   captureException.mockClear();
   __resetModelCache();
   __resetDbAvailability();
@@ -102,10 +121,11 @@ describe('upsertListings when Postgres is unreachable', () => {
 describe('upsertListings when the database is healthy', () => {
   it('resolves each distinct model once, not once per listing', async () => {
     await upsertListings(ROWS);
-    // 40 distinct models x (lookup + re-select after insert), plus the make.
-    // The old per-row fan-out issued 480+ instead; measured here at 96.
+    // 40 distinct models, each costing a lookup plus a re-select after insert,
+    // plus the make. The old per-row fan-out issued one lookup per listing; the
+    // point of the assertion is that this stays far below ROWS.length.
     expect(state.selects).toBeGreaterThan(0);
-    expect(state.selects).toBeLessThanOrEqual(120);
+    expect(state.selects).toBeLessThan(ROWS.length);
   });
 
   it('does not report a query-level failure as an outage', async () => {
@@ -162,5 +182,24 @@ describe('recovery after an outage in the same process', () => {
     state.selects = 0;
     await expect(upsertListings(ROWS)).resolves.toMatchObject({ skipped: 0 });
     expect(state.selects).toBeGreaterThan(0);
+  });
+});
+
+
+// Regression: the model id is derived from a hash, so it can land on one an
+// unrelated model already holds. onConflictDoNothing targets (make_id, slug) and
+// does not cover the primary key, so that insert threw — and because the throw
+// happened while resolving identity, the listing silently kept a null model_id.
+// About 11 000 rows sat like that after a hash-input change moved every id.
+describe('model id collides with an unrelated row', () => {
+  it('does not lose the batch when an id is already taken', async () => {
+    state.pkFailures = 3;
+    await expect(upsertListings(ROWS.slice(0, 20))).resolves.toBeDefined();
+  });
+
+  it('bounds the retries rather than looping forever', async () => {
+    state.pkFailures = 9999; // every candidate id taken
+    await expect(upsertListings(ROWS.slice(0, 1))).resolves.toBeDefined();
+    expect(state.inserts).toBeLessThan(40);
   });
 });

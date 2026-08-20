@@ -126,26 +126,41 @@ export async function ensureModelId(
       modelIdCache.set(key, found[0]!.id);
       return found[0]!.id;
     }
-    const id = 1_000_000 + (hash32(`${brand}-${modelSlug}`) & 0x7fffff);
-    await db
-      .insert(vehicleModels)
-      .values({
-        id,
-        makeId,
-        // The model's own name — never the listing title. Passing the title
-        // through produced catalog entries called "Predám Škoda Octavia 2.0 TDI".
-        slug: modelSlug,
-        name: toTitleCase(modelSlug),
-      })
-      .onConflictDoNothing({ target: [vehicleModels.makeId, vehicleModels.slug] });
-    const refound = await db
-      .select({ id: vehicleModels.id })
-      .from(vehicleModels)
-      .where(and(eq(vehicleModels.makeId, makeId), eq(vehicleModels.slug, modelSlug)))
-      .limit(1);
-    const finalId = refound[0]?.id ?? id;
-    modelIdCache.set(key, finalId);
-    return finalId;
+    // The id is derived from a hash, so it can land on one an unrelated model
+    // already holds — and onConflictDoNothing(make_id, slug) does not cover the
+    // primary key, so that insert throws. It did: changing the hash input to
+    // include the brand moved every id, and ~11 000 listings stopped resolving
+    // because "audi/q7" kept colliding. Probe a free id instead of giving up.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const id = 1_000_000 + (hash32(`${brand}-${modelSlug}-${attempt}`) & 0x7fffff);
+      try {
+        await db
+          .insert(vehicleModels)
+          .values({
+            id,
+            makeId,
+            // The model's own name — never the listing title. Passing the title
+            // through produced entries called "Predám Škoda Octavia 2.0 TDI".
+            slug: modelSlug,
+            name: toTitleCase(modelSlug),
+          })
+          .onConflictDoNothing({ target: [vehicleModels.makeId, vehicleModels.slug] });
+      } catch (e) {
+        if (isConnectionError(e)) throw noteDbUnavailable(e, { step: 'ensureModelId', modelSlug });
+        continue; // id taken by an unrelated model — try the next candidate
+      }
+      const refound = await db
+        .select({ id: vehicleModels.id })
+        .from(vehicleModels)
+        .where(and(eq(vehicleModels.makeId, makeId), eq(vehicleModels.slug, modelSlug)))
+        .limit(1);
+      const finalId = refound[0]?.id;
+      if (finalId != null) {
+        modelIdCache.set(key, finalId);
+        return finalId;
+      }
+    }
+    return null;
   } catch (e) {
     // An unreachable server is not a per-model problem: report it once and let
     // it abort the run instead of repeating for every remaining listing.
