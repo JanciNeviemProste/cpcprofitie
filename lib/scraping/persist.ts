@@ -327,13 +327,39 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
         .onConflictDoUpdate({
           target: [listings.source, listings.sourceId],
           set: {
+            // Price is the ONE field here that is deliberately overwritten,
+            // because it is the one fact that genuinely changes: a seller
+            // dropping the price is the single event this product exists to
+            // detect. Coalescing it would pin a stale asking price on a
+            // "Cena dohodou" advert for ever, and a phantom price is not a
+            // missing data point — it is a wrong one, in the median of the
+            // exact cohort someone is about to buy in. Measured cost of
+            // leaving it alone: 16 rows.
             priceEur: sql`excluded.price_eur`,
-            year: sql`excluded.year`,
-            mileageKm: sql`excluded.mileage_km`,
-            fuel: sql`excluded.fuel`,
-            transmission: sql`excluded.transmission`,
-            region: sql`excluded.region`,
-            modelId: sql`excluded.model_id`,
+            // Everything below describes the car, not the seller's intent, and
+            // none of it changes between two reads of the same advert. A null
+            // from a re-scrape therefore carries no information, and writing it
+            // destroys what an earlier detail-page read established.
+            //
+            // This is not a new convention: viewCount and sellerPhone below
+            // already coalesce, and bazos-sk.ts:81 documents the reason. Year
+            // and mileage were simply missed — and once the scrape cron began
+            // rotating through the whole corpus instead of re-reading the same
+            // 30 pages, that oversight started erasing about 1 800 recovered
+            // years and 1 400 mileages every few hours.
+            year: sql`coalesce(excluded.year, ${listings.year})`,
+            mileageKm: sql`coalesce(excluded.mileage_km, ${listings.mileageKm})`,
+            fuel: sql`coalesce(excluded.fuel, ${listings.fuel})`,
+            transmission: sql`coalesce(excluded.transmission, ${listings.transmission})`,
+            // bazos-sk.ts:99 hardcodes region: null — its list page has no
+            // location at all, so this was wiping region for 99.4% of bazoš
+            // listings on every pass.
+            region: sql`coalesce(excluded.region, ${listings.region})`,
+            // Also guards against ensureModelId returning null on a transient
+            // DB error, which would otherwise turn a blip into permanent loss.
+            // Cannot resurrect a model the catalog merge cleared: the stored
+            // value is NULL there, so coalesce falls through to the new one.
+            modelId: sql`coalesce(excluded.model_id, ${listings.modelId})`,
             // Coalesce so a rescrape that fails to parse a title doesn't wipe
             // a previously good one. New non-null titles still win on update.
             rawTitle: sql`coalesce(excluded.raw_title, ${listings.rawTitle})`,
@@ -686,8 +712,15 @@ export async function persistDetails(details: NormalizedDetail[]): Promise<Detai
         if (o.transmission != null)
           set.transmission = sql`coalesce(${listings.transmission}, ${o.transmission})`;
         if (o.region != null) set.region = sql`coalesce(${listings.region}, ${o.region})`;
-        if (o.priceEur != null)
+        if (o.priceEur != null) {
           set.priceEur = sql`coalesce(${listings.priceEur}, ${String(o.priceEur)})`;
+          // A price read off the detail page is a real observation, so it
+          // counts for freshness. Migration 0012 said this path stamped the
+          // column; it never did, which left every price recovered from a
+          // detail page looking unverified — excluded from the price history
+          // and counted against the freshness metric.
+          set.priceCheckedAt = sql`coalesce(${listings.priceCheckedAt}, now())`;
+        }
       }
       // Identity backfill for title-less/model-less stubs: resolve model_id the
       // same way list scraping does and patch model_id / raw_title only when
