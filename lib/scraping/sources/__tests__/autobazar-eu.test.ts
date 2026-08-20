@@ -64,3 +64,26 @@ describe('autobazar.eu parseListingsPage', () => {
     expect(url1).not.toBe(url2);
   });
 });
+
+describe('autobazar.eu — the payload moved', () => {
+  const SEARCH_RECORDS = readFileSync(
+    fileURLToPath(new URL('../__fixtures__/autobazar-eu-listing-searchrecords.html', import.meta.url)),
+    'utf8',
+  );
+
+  it('reads listings from pageProps.searchRecords', () => {
+    // Real page captured on 2026-08-20, the day trpcState.queries went empty
+    // and the results moved. Every list page parsed to zero that day while
+    // still returning HTTP 200, so the scrape reported success and the largest
+    // source silently went dark.
+    const rows = parseListingsPage(SEARCH_RECORDS);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows[0]!.sourceId).toBeTruthy();
+  });
+
+  it('still reads the older trpcState shape', () => {
+    // Both paths stay supported: a site that has moved its payload once will
+    // move it again, and falling back is cheaper than going blind.
+    expect(parseListingsPage(FIXTURE).length).toBeGreaterThan(0);
+  });
+});

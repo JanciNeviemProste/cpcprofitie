@@ -50,23 +50,42 @@ type NextDataEnvelope = {
   props?: { pageProps?: { trpcState?: { queries?: TrpcQuery[] } } };
 };
 
+/** An array of listing-shaped objects, or null. */
+function asListingArray(v: unknown): RawListing[] | null {
+  return Array.isArray(v) && v.length > 0 && typeof (v[0] as { id?: unknown })?.id === 'string'
+    ? (v as RawListing[])
+    : null;
+}
+
+/**
+ * Find the listing array wherever this build of the site put it.
+ *
+ * It used to live only in trpcState.queries[].state.data.data. On 2026-08-20
+ * that array went empty and the results moved to pageProps.searchRecords.data
+ * — same objects, different path. Every list page then parsed to zero listings
+ * while still returning HTTP 200, so the scrape reported success and quietly
+ * stopped seeing the largest of the three sources.
+ *
+ * Hence several known paths rather than one: a site that has moved its payload
+ * once will move it again, and the cost of looking in three places is nothing
+ * against a source silently going dark.
+ */
 function pickListings(parsed: unknown): RawListing[] {
-  // Drill into trpcState.queries[].state.data.data — that's where the
-  // `search.search` query result is. We accept any query whose data
-  // payload is an array of objects with an `id` field.
-  const queries = (parsed as NextDataEnvelope)?.props?.pageProps?.trpcState?.queries;
-  if (!Array.isArray(queries)) return [];
-  for (const q of queries) {
-    const arr = q?.state?.data?.data;
-    if (
-      Array.isArray(arr) &&
-      arr.length > 0 &&
-      typeof (arr[0] as { id?: unknown })?.id === 'string'
-    ) {
-      return arr as RawListing[];
+  const pageProps = (parsed as NextDataEnvelope)?.props?.pageProps;
+  if (!pageProps) return [];
+
+  const queries = pageProps.trpcState?.queries;
+  if (Array.isArray(queries)) {
+    for (const q of queries) {
+      const found = asListingArray(q?.state?.data?.data);
+      if (found) return found;
     }
   }
-  return [];
+
+  const search = (pageProps as { searchRecords?: unknown }).searchRecords;
+  return (
+    asListingArray((search as { data?: unknown })?.data) ?? asListingArray(search) ?? []
+  );
 }
 
 export function parseListingsPage(html: string): NormalizedListing[] {
