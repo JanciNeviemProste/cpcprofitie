@@ -30,10 +30,12 @@ export { isoWeekStart };
  * Minimum cohort size: 3 listings. Below that, the snapshot is skipped — the
  * numbers would be noise. The UI filters by cohort size.
  */
-export async function computeWeeklySnapshots(opts: {
-  minCohortSize?: number;
-  asOf?: Date;
-} = {}): Promise<WeeklySnapshotStats> {
+export async function computeWeeklySnapshots(
+  opts: {
+    minCohortSize?: number;
+    asOf?: Date;
+  } = {},
+): Promise<WeeklySnapshotStats> {
   const minCohortSize = opts.minCohortSize ?? 3;
   const asOf = opts.asOf ?? new Date();
   const weekStart = isoWeekStart(asOf);
@@ -72,7 +74,7 @@ export async function computeWeeklySnapshots(opts: {
       ) AS active_prices,
       COUNT(*) FILTER (WHERE l.sold_at IS NOT NULL AND l.sold_at >= ${sql.raw(weekStartLit)}) AS sold_this_week,
       ARRAY_AGG(
-        EXTRACT(EPOCH FROM (coalesce(l.sold_at, l.removed_at) - l.first_seen_at)) / 86400.0
+        (EXTRACT(EPOCH FROM (coalesce(l.sold_at, l.removed_at) - l.first_seen_at)) / 86400.0)::float8
       ) FILTER (
         WHERE l.sold_at IS NOT NULL AND l.sold_at >= ${sql.raw(weekStartLit)}
       ) AS sold_days_listed
@@ -90,9 +92,9 @@ export async function computeWeeklySnapshots(opts: {
     region: string;
     year_bucket: string;
     mileage_bucket: string;
-    active_prices: number[] | null;
+    active_prices: unknown;
     sold_this_week: number | string;
-    sold_days_listed: number[] | null;
+    sold_days_listed: unknown;
   }>;
 
   const modelsSeen = new Set<number>();
@@ -100,13 +102,11 @@ export async function computeWeeklySnapshots(opts: {
   // Mid-loop failure would otherwise leave the week half-written.
   const valuesToUpsert: Array<typeof marketSnapshots.$inferInsert> = [];
   for (const row of rows) {
-    const prices = (row.active_prices ?? []).filter((p) => Number.isFinite(p) && p > 0);
+    const prices = toNumberArray(row.active_prices).filter((p) => p > 0);
     if (prices.length < minCohortSize) continue;
     modelsSeen.add(row.model_id);
 
-    const daysListed = (row.sold_days_listed ?? []).filter(
-      (d): d is number => Number.isFinite(d) && d >= 0,
-    );
+    const daysListed = toNumberArray(row.sold_days_listed).filter((d) => d >= 0);
     const inputs: SnapshotInput[] = prices.map((priceEur, i) => ({
       priceEur,
       daysListed: daysListed[i] ?? null,
@@ -168,4 +168,29 @@ export async function computeWeeklySnapshots(opts: {
     rowsUpserted: upserted,
     modelsScanned: modelsSeen.size,
   };
+}
+
+/**
+ * Normalise an aggregated Postgres array into numbers.
+ *
+ * ARRAY_AGG of float8 arrives as a JS array, but numeric[] does not — it comes
+ * back as the raw literal "{1.5,2.5}", and calling .filter on it threw
+ * "(e.sold_days_listed ?? []).filter is not a function", which failed the whole
+ * weekly snapshot step while the surrounding cron reported success. Accept both
+ * shapes rather than trusting the driver to be consistent.
+ */
+export function toNumberArray(value: unknown): number[] {
+  if (value == null) return [];
+  const raw = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.replace(/^{|}$/g, '').split(',')
+      : [];
+  return raw
+    .map((v) => (typeof v === 'number' ? v : String(v).trim()))
+    // "{}" splits to [""] and Number("") is 0, not NaN — an empty aggregate
+    // would otherwise become a single zero-day sale.
+    .filter((v) => v !== '' && v !== 'NULL')
+    .map((v) => (typeof v === 'number' ? v : Number(v)))
+    .filter((n) => Number.isFinite(n));
 }

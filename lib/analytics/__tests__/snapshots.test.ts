@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { toNumberArray } from '../snapshots';
 import { isoWeekStart } from '../dates';
 
 describe('isoWeekStart', () => {
@@ -34,5 +35,29 @@ describe('isoWeekStart', () => {
   it('returns time set to midnight UTC', () => {
     const start = isoWeekStart(new Date('2026-05-20T15:30:00Z'));
     expect(start.toISOString()).toBe('2026-05-18T00:00:00.000Z');
+  });
+});
+
+// Regression: ARRAY_AGG of float8 arrives as a JS array, but numeric[] arrives
+// as the raw literal "{1.5,2.5}". Calling .filter on that threw
+// "(e.sold_days_listed ?? []).filter is not a function", which failed the whole
+// weekly snapshot step — while the cron around it still reported success, so
+// market_snapshots quietly stopped updating.
+describe('toNumberArray', () => {
+  it('accepts the array shape the driver usually returns', () => {
+    expect(toNumberArray([1.5, 2.5])).toEqual([1.5, 2.5]);
+  });
+
+  it('accepts the raw Postgres array literal', () => {
+    expect(toNumberArray('{1.5,2.5,3}')).toEqual([1.5, 2.5, 3]);
+  });
+
+  it('treats null and an empty aggregate as no rows', () => {
+    expect(toNumberArray(null)).toEqual([]);
+    expect(toNumberArray('{}')).toEqual([]);
+  });
+
+  it('drops values that are not numbers rather than yielding NaN', () => {
+    expect(toNumberArray('{1,NULL,3}')).toEqual([1, 3]);
   });
 });
