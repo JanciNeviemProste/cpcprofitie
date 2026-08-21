@@ -4,6 +4,7 @@ import {
   computeRepostPct,
   pickClusterAlerts,
   pickDriftAlerts,
+  pickCountryCoverageAlerts,
   pickFreshnessAlerts,
   toPublicDataHealth,
   type DataQualityReport,
@@ -258,5 +259,62 @@ describe('pickFreshnessAlerts', () => {
     );
     expect(a).toHaveLength(1);
     expect(a[0]!.source).toBe('autobazar.eu');
+  });
+});
+
+describe('pickCountryCoverageAlerts', () => {
+  // The gate for tightening the market predicate from "exclude what is known
+  // foreign" to "admit only confirmed Slovak". Flipping while coverage is thin
+  // retires rows we know nothing bad about, so the threshold is a measured
+  // number and not a feeling about how far the rotation has got.
+  function withCountry(rows: Array<{ source: string; active: number; nullCountryPct: number }>) {
+    return {
+      ok: true,
+      generatedAt: '2026-08-21T00:00:00.000Z',
+      completeness: rows.map((r) => ({ ...r }) as never),
+      enrichment: [],
+      dealScore: { activeCanonical: 0, flipRows: 0, withDealScore: 0, avgCohortSize: null },
+      dedup: {
+        total: 0,
+        canonical: 0,
+        repostClones: 0,
+        repostPct: 0,
+        vinCoveragePct: 0,
+        maxClusterSize: 0,
+        crossSourceVinClusters: 0,
+        vinConflictClusters: 0,
+        incoherentClusters: 0,
+        chainedClones: 0,
+      },
+      freshness: [],
+    } as unknown as DataQualityReport;
+  }
+
+  it('stays silent once a source is essentially fully attributed', () => {
+    const alerts = pickCountryCoverageAlerts(
+      withCountry([{ source: 'bazos.sk', active: 30000, nullCountryPct: 0 }]),
+    );
+    expect(alerts).toEqual([]);
+  });
+
+  it('warns while the reference cannot safely be tightened', () => {
+    const alerts = pickCountryCoverageAlerts(
+      withCountry([{ source: 'autobazar.eu', active: 48000, nullCountryPct: 9.2 }]),
+    );
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]?.level).toBe('warn');
+  });
+
+  it('escalates when a fifth of a source has no market', () => {
+    const alerts = pickCountryCoverageAlerts(
+      withCountry([{ source: 'autobazar.eu', active: 48000, nullCountryPct: 21 }]),
+    );
+    expect(alerts[0]?.level).toBe('error');
+  });
+
+  it('ignores a source with nothing active', () => {
+    expect(
+      pickCountryCoverageAlerts(withCountry([{ source: 'x', active: 0, nullCountryPct: 100 }])),
+    ).toEqual([]);
   });
 });

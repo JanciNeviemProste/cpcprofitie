@@ -157,6 +157,13 @@ export type DealCard = {
   year: number | null;
   mileageKm: number | null;
   region: string | null;
+  /**
+   * ISO country of the advert. Present because the deals list deliberately
+   * scores foreign cars against the SLOVAK reference — that arbitrage is the
+   * point — and a dealer must be able to see that the car is abroad rather
+   * than infer it from a town name.
+   */
+  country: string | null;
   priceEur: number | null;
   heroPhotoUrl: string | null;
   dealScore: number;
@@ -222,6 +229,7 @@ export type DealRow = {
   year: number | null;
   mileage_km: number | null;
   region: string | null;
+  country: string | null;
   price_eur: number | null;
   market_median_eur: number;
   market_p25_eur: number;
@@ -249,6 +257,7 @@ export function mapDealRow(r: DealRow): DealCard {
     year: r.year,
     mileageKm: r.mileage_km,
     region: r.region,
+    country: r.country,
     priceEur: r.price_eur != null ? Math.round(r.price_eur) : null,
     heroPhotoUrl: r.hero_photo_url,
     dealScore: r.effective_score,
@@ -331,6 +340,7 @@ async function getTopDealsV2Unsafe(opts: GetTopDealsOpts): Promise<DealCard[]> {
       l.year,
       l.mileage_km,
       l.region,
+      l.country,
       l.price_eur::float8 AS price_eur,
       fo.market_median_eur::float8 AS market_median_eur,
       fo.market_p25_eur::float8 AS market_p25_eur,

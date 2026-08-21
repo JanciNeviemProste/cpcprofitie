@@ -3,6 +3,7 @@ import * as Sentry from '@sentry/nextjs';
 import {
   getDataQualityReport,
   pickClusterAlerts,
+  pickCountryCoverageAlerts,
   pickDriftAlerts,
   pickFreshnessAlerts,
 } from '@/lib/db/queries/data-quality';
@@ -75,6 +76,25 @@ export async function GET(request: Request) {
       );
     }
 
+    // Not a failure — a readiness signal. The market predicate currently keeps
+    // rows whose country is unknown, so this is what says when the reference
+    // can safely be tightened to confirmed-Slovak-only. Reported at info while
+    // it is merely incomplete; error only when a fifth of a source has no
+    // market at all, which would mean the country parser stopped writing.
+    const countryAlerts = pickCountryCoverageAlerts(report);
+    const countryErrors = countryAlerts.filter((a) => a.level === 'error');
+    if (countryErrors.length > 0) {
+      Sentry.captureMessage(
+        `Krajina sa neurčuje: ${countryErrors.map((a) => `${a.source} (${a.reason})`).join('; ')}`,
+        { level: 'error', tags: { component: 'data-quality-alert' }, extra: { countryAlerts } },
+      );
+    } else if (countryAlerts.length > 0) {
+      Sentry.captureMessage(
+        `Pokrytie krajiny: ${countryAlerts.map((a) => a.source).join(', ')}`,
+        { level: 'info', tags: { component: 'data-quality-alert' }, extra: { countryAlerts } },
+      );
+    }
+
     const alerts = pickDriftAlerts(report);
     const drift = alerts.filter((a) => a.health === 'drift');
 
@@ -96,6 +116,7 @@ export async function GET(request: Request) {
       driftCount: drift.length,
       freshness: report.freshness,
       freshnessAlerts,
+      countryAlerts,
       warnCount: alerts.length - drift.length,
       alerts,
       elapsedMs: Date.now() - startedAt,

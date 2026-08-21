@@ -203,8 +203,17 @@ export function parseListingsPage(html: string): NormalizedListing[] {
     // were a euro price. So the non-EUR fallbacks are available only once the
     // advert is known to be Slovak; anywhere else a missing finalPrice must
     // yield null rather than a number in the wrong currency.
+    //
+    // Zero is absent, not free. `??` lets a 0 through — 45 rows were stored as
+    // "costs nothing" rather than "has no price", which claims a price was
+    // verified, renders as 0 EUR, and makes the next real price look like a
+    // change. PRICE_MIN keeps them out of medians, so this is about not
+    // asserting something we never read.
+    const positive = (v: number | null | undefined): number | null =>
+      typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null;
     const price =
-      r.finalPrice ?? (country === 'SK' ? (r.price ?? r.listPrice ?? null) : null);
+      positive(r.finalPrice) ??
+      (country === 'SK' ? (positive(r.price) ?? positive(r.listPrice)) : null);
     const yearRaw = r.year ?? r.yearOfProduction ?? r.yearValue ?? null;
     const year =
       typeof yearRaw === 'number'

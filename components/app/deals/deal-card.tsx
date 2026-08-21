@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { ArrowUpRight, ChevronDown, MapPin, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { displayRegion } from '@/lib/data/sk-regions';
+import { CountryBadge } from '../country-badge';
 import { DealScoreBadge } from './deal-score-badge';
 import { CostCalculator } from './cost-calculator';
 import type { DealCard as DealCardData } from '@/lib/db/queries/deals';
@@ -187,10 +189,11 @@ export function DealCard({
                   <span className="opacity-40">/</span>
                   <span className="inline-flex items-center gap-0.5 normal-case tracking-normal">
                     <MapPin className="size-2.5" />
-                    <span className="max-w-[8rem] truncate">{deal.region}</span>
+                    <span className="max-w-[8rem] truncate">{displayRegion(deal.region)}</span>
                   </span>
                 </>
               ) : null}
+              <CountryBadge country={deal.country} />
             </div>
           </Link>
         ) : null}

@@ -27,6 +27,15 @@ export type SourceCompleteness = {
   nullTransmissionPct: number;
   nullRegionPct: number;
   nullModelPct: number;
+  /**
+   * Share of active rows whose market we have not established.
+   *
+   * This is the gate for tightening the reference from "exclude what is known
+   * foreign" to "admit only confirmed Slovak": flipping while this is high
+   * would drop tens of thousands of rows we know nothing bad about. A measured
+   * number rather than a guess about how far the rotation has got.
+   */
+  nullCountryPct: number;
   outlierPrice: number;
   outlierMileage: number;
   // Share of active listings carrying every field a DealScore cohort needs.
@@ -180,6 +189,46 @@ export function pickFreshnessAlerts(report: DataQualityReport): FreshnessAlert[]
   return alerts;
 }
 
+export type CountryCoverageAlert = {
+  source: string;
+  level: 'warn' | 'error';
+  reason: string;
+};
+
+/**
+ * How close each source is to being able to carry a confirmed-Slovak-only
+ * reference.
+ *
+ * The market predicate currently means "exclude what we know is not Slovak".
+ * Tightening it to "admit only confirmed Slovak" is a one-way change to what
+ * gets published, so it must be gated on an observed number: this selector is
+ * that number. Below 2% unknown, the tightening costs almost nothing; above
+ * 20% it would silently retire a fifth of a source.
+ *
+ * Pure, like the other pick* selectors, so the thresholds are testable without
+ * a database.
+ */
+export function pickCountryCoverageAlerts(report: DataQualityReport): CountryCoverageAlert[] {
+  const alerts: CountryCoverageAlert[] = [];
+  for (const c of report.completeness) {
+    if (c.active === 0) continue;
+    if (c.nullCountryPct >= 20) {
+      alerts.push({
+        source: c.source,
+        level: 'error',
+        reason: `${c.nullCountryPct} % aktívnych inzerátov nemá určenú krajinu`,
+      });
+    } else if (c.nullCountryPct >= 2) {
+      alerts.push({
+        source: c.source,
+        level: 'warn',
+        reason: `${c.nullCountryPct} % bez krajiny — na sprísnenie referencie treba pod 2 %`,
+      });
+    }
+  }
+  return alerts;
+}
+
 export type EnrichmentCoverage = {
   source: string;
   active: number;
@@ -269,6 +318,7 @@ export async function getDataQualityReport(): Promise<DataQualityReport> {
         COUNT(*) FILTER (WHERE ${ACTIVE} AND transmission IS NULL)::int AS null_transmission,
         COUNT(*) FILTER (WHERE ${ACTIVE} AND region IS NULL)::int AS null_region,
         COUNT(*) FILTER (WHERE ${ACTIVE} AND model_id IS NULL)::int AS null_model,
+        COUNT(*) FILTER (WHERE ${ACTIVE} AND country IS NULL)::int AS null_country,
         COUNT(*) FILTER (
           WHERE ${ACTIVE} AND price_eur IS NOT NULL AND (price_eur < ${PRICE_MIN} OR price_eur > ${PRICE_MAX})
         )::int AS outlier_price,
@@ -296,6 +346,7 @@ export async function getDataQualityReport(): Promise<DataQualityReport> {
       null_transmission: number;
       null_region: number;
       null_model: number;
+      null_country: number;
       outlier_price: number;
       outlier_mileage: number;
       cohort_ready: number;
@@ -317,6 +368,7 @@ export async function getDataQualityReport(): Promise<DataQualityReport> {
         nullTransmissionPct: pct(r.null_transmission, r.active),
         nullRegionPct,
         nullModelPct,
+        nullCountryPct: pct(r.null_country, r.active),
         outlierPrice: r.outlier_price,
         outlierMileage: r.outlier_mileage,
         cohortReadyPct: pct(r.cohort_ready, r.active),

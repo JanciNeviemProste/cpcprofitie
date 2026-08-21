@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { ArrowUpRight, MapPin } from 'lucide-react';
 import { DealScoreBadge } from './deal-score-badge';
 import type { DealCard as DealCardData } from '@/lib/db/queries/deals';
+import { displayRegion } from '@/lib/data/sk-regions';
+import { CountryBadge } from '../country-badge';
 
 const NBSP = ' ';
 
@@ -92,10 +94,13 @@ export function HeroDeal({ deal }: { deal: DealCardData }) {
                     <span className="mx-2 opacity-50">/</span>
                     <span className="inline-flex items-center gap-1 normal-case tracking-normal">
                       <MapPin className="size-3" />
-                      {deal.region}
+                      {displayRegion(deal.region)}
                     </span>
                   </>
                 ) : null}
+                <span className="ml-2 align-middle">
+                  <CountryBadge country={deal.country} />
+                </span>
               </div>
               <h2 className="font-heading mt-2 text-3xl font-semibold leading-[1.05] tracking-tight sm:text-4xl lg:text-5xl">
                 {title(deal)}

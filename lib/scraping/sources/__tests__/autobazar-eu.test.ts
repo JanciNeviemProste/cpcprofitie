@@ -220,6 +220,16 @@ describe('autobazar.eu price currency', () => {
     expect(row?.country).toBe('SK');
   });
 
+  it('treats a zero price as absent, not as free', () => {
+    // `??` lets 0 through, which stores "costs nothing" instead of "no price
+    // read": it claims a price was verified, renders as 0 EUR, and makes the
+    // next real price look like a change.
+    const [row] = parseListingsPage(
+      pageWith([{ ...czBase, id: 'zero1', location: ZILINA, finalPrice: 0, price: 0 }]),
+    );
+    expect(row?.priceEur).toBeNull();
+  });
+
   it('does not fall back when the country is unknown', () => {
     const [row] = parseListingsPage(
       pageWith([{ ...czBase, id: 'hu1', location: { name: 'Győr', parents: ['400000000'] }, price: 4500000 }]),

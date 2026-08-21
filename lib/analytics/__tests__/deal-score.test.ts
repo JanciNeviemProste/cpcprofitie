@@ -143,6 +143,28 @@ describe('buildExplainer', () => {
     expect(txt).toContain('Súkromný predajca');
   });
 
+  it('never shows the internal country prefix to a dealer', () => {
+    // The prefix is how queries tell the two markets apart. Put in front of a
+    // person it read "v regióne SK-Brno" — wrong twice, since Brno is Czech.
+    const txt = buildExplainer(
+      {
+        priceEur: 7000,
+        cohortMedianEur: 10000,
+        cohortSize: 25,
+        sellerType: 'dealer',
+        photoCount: 8,
+        daysSinceFirstSeen: 5,
+      },
+      'Skoda',
+      'Octavia',
+      2018,
+      'CZ-Brno',
+    );
+    expect(txt).toContain('v regióne Brno');
+    expect(txt).not.toContain('CZ-');
+    expect(txt).not.toContain('SK-');
+  });
+
   it('handles missing seller and region', () => {
     const txt = buildExplainer(
       {

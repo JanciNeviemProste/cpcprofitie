@@ -2,6 +2,9 @@
 // explainer/profit estimation. No DB dependency — callers wire up the
 // inputs from listings/cohort queries.
 
+// sk-regions is pure data, so this stays a dependency-free module.
+import { displayRegion } from '@/lib/data/sk-regions';
+
 export type DealScoreInput = {
   priceEur: number;
   cohortMedianEur: number;
@@ -84,7 +87,11 @@ export function buildExplainer(
       : input.sellerType === 'dealer'
         ? 'Predajca'
         : 'Predajca neznámy';
-  const regionTxt = region ? ` v regióne ${region}` : '';
+  // Without the prefix: this is a Slovak sentence shown to a dealer, and the
+  // 'SK-'/'CZ-' marker is an internal key for telling the markets apart in
+  // queries. It read "v regióne SK-Brno" — wrong twice over, since Brno is
+  // not in Slovakia.
+  const regionTxt = region ? ` v regióne ${displayRegion(region)}` : '';
   return `${pct}% pod mediánom ${car}${regionTxt} (cohort n=${input.cohortSize}). ${sellerLabel}. Inzerát vystavený pred ${Math.round(input.daysSinceFirstSeen)} dňami.`;
 }
 
