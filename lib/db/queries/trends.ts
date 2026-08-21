@@ -3,7 +3,7 @@
 import * as Sentry from '@sentry/nextjs';
 import { sql } from 'drizzle-orm';
 import { getDb } from '../index';
-import { plausiblePricedRaw } from '@/lib/analytics/quality';
+import { marketReferenceRaw } from '@/lib/analytics/quality';
 
 export type TrendRow = {
   modelId: number;
@@ -133,8 +133,7 @@ async function getTrendingModelsUnsafe(opts: {
         AND l.canonical_listing_id IS NULL
         AND l.sold_at IS NULL
         AND l.removed_at IS NULL
-        AND l.is_vehicle = true
-        AND ${plausiblePricedRaw('l')}
+        AND ${marketReferenceRaw('l')}
       GROUP BY l.model_id
       -- Below this there is no market to speak of; the UI shows nothing rather
       -- than a number nobody could defend.

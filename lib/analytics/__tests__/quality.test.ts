@@ -4,8 +4,10 @@ import {
   PRICE_MAX,
   PRICE_MIN,
   YEAR_MIN,
+  marketReferenceRaw,
   plausibleListing,
   plausiblePricedRaw,
+  slovakMarketRaw,
 } from '../quality';
 
 // The predicates are drizzle SQL fragments; we assert the compiled SQL string
@@ -46,6 +48,35 @@ describe('plausiblePricedRaw', () => {
   it('requires a non-null price within bounds (median math needs a price)', () => {
     const s = toSql(plausiblePricedRaw('l'));
     expect(s).toContain('IS NOT NULL');
+    expect(s).toContain(String(PRICE_MIN));
+    expect(s).toContain(String(PRICE_MAX));
+  });
+});
+
+describe('slovakMarketRaw', () => {
+  it('lets an unknown country through', () => {
+    // autobazar.eu rows only gain a country when the rotation re-reads them.
+    // A hard equality here would drop tens of thousands of rows we know
+    // nothing bad about — the predicate excludes what is known foreign.
+    const s = toSql(slovakMarketRaw('l'));
+    expect(s).toContain('country IS NULL');
+    expect(s).toContain('OR');
+  });
+
+  it('names the market it admits', () => {
+    expect(toSql(slovakMarketRaw('l'))).toContain('country');
+  });
+});
+
+describe('marketReferenceRaw', () => {
+  // The point of this composite is that no caller has to remember a list.
+  // is_vehicle was missing from three of four query sites for months because
+  // it was a list to remember; a fourth guard must not repeat that.
+  it('carries every guard the price reference depends on', () => {
+    const s = toSql(marketReferenceRaw('l'));
+    expect(s).toContain('is_vehicle');
+    expect(s).toContain('price_eur');
+    expect(s).toContain('country');
     expect(s).toContain(String(PRICE_MIN));
     expect(s).toContain(String(PRICE_MAX));
   });

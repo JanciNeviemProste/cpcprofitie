@@ -1,7 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { autobazarEu, BRAND_MODEL_BUCKETS, parseListingsPage } from '../autobazar-eu';
+import {
+  autobazarEu,
+  BRAND_MODEL_BUCKETS,
+  parseListingsPage,
+  resolveCountry,
+  resolveRegionName,
+} from '../autobazar-eu';
 
 const FIXTURE = readFileSync(
   fileURLToPath(new URL('../__fixtures__/autobazar-eu-listing.html', import.meta.url)),
@@ -85,5 +91,140 @@ describe('autobazar.eu — the payload moved', () => {
     // Both paths stay supported: a site that has moved its payload once will
     // move it again, and falling back is cheaper than going blind.
     expect(parseListingsPage(FIXTURE).length).toBeGreaterThan(0);
+  });
+});
+
+// Every shape below was observed live on autobazar.eu, not invented. The depth
+// of parentNames varies with how precisely the advert is placed, which is why
+// both helpers index from the end rather than from a fixed position.
+const ZILINA = {
+  id: '100011403',
+  name: 'Žilina',
+  parentNames: ['okres Žilina', 'Žilinský kraj', 'Slovensko'],
+  parents: ['100001042', '100000105', '100000000'],
+  defaultLang: 'sk',
+};
+const BRATISLAVA = {
+  // Non-numeric node id, observed live. A "starts with 1" rule on location.id
+  // reads this as unknown; the country still has to resolve from `parents`.
+  id: '0_i9128BtwC-IGpZQrnK',
+  name: 'Bratislava',
+  parentNames: ['Bratislavský kraj', 'Slovensko'],
+  parents: ['100000101', '100000000'],
+  defaultLang: 'sk',
+};
+const NITRIANSKY = {
+  id: '100000104',
+  name: 'Nitriansky kraj',
+  parentNames: ['Slovensko'],
+  parents: ['100000000'],
+  defaultLang: 'sk',
+};
+const SLOVENSKO = { id: '100000000', name: 'Slovensko', parentNames: [], parents: [], defaultLang: 'sk' };
+const OKRES_PRAHA = {
+  id: '200000200',
+  name: 'okres Praha',
+  parentNames: ['Hlavní město Praha', 'Česká republika'],
+  parents: ['200000200', '200000000'],
+  defaultLang: 'cs',
+};
+const VYSOCINA = {
+  id: '200000610',
+  name: 'Vysočina kraj',
+  parentNames: ['Česká republika'],
+  parents: ['200000000'],
+  defaultLang: 'cs',
+};
+
+describe('resolveCountry', () => {
+  it('reads the country from the last ancestor, not the node id', () => {
+    expect(resolveCountry(ZILINA)).toBe('SK');
+    expect(resolveCountry(OKRES_PRAHA)).toBe('CZ');
+  });
+
+  it('resolves a node whose own id is not numeric', () => {
+    expect(resolveCountry(BRATISLAVA)).toBe('SK');
+  });
+
+  it('falls back to the node id when it is itself the country', () => {
+    expect(resolveCountry(SLOVENSKO)).toBe('SK');
+  });
+
+  it('returns null rather than guessing for an unknown country', () => {
+    // Hungary and Austria really do appear on this portal.
+    expect(
+      resolveCountry({ name: 'Győr', parentNames: ['Magyarország'], parents: ['400000000'] }),
+    ).toBeNull();
+    expect(resolveCountry(null)).toBeNull();
+    expect(resolveCountry({ name: 'Nowhere' })).toBeNull();
+  });
+
+  it('returns null when the language contradicts the root id', () => {
+    // A disagreement means the id map has gone stale. Failing closed keeps a
+    // mislabelled car out of the reference; guessing puts it in.
+    expect(resolveCountry({ ...ZILINA, defaultLang: 'cs' })).toBeNull();
+  });
+});
+
+describe('resolveRegionName', () => {
+  it('takes the second-to-last ancestor at every observed depth', () => {
+    expect(resolveRegionName(ZILINA)).toBe('Žilinský kraj');
+    expect(resolveRegionName(BRATISLAVA)).toBe('Bratislavský kraj');
+    expect(resolveRegionName(OKRES_PRAHA)).toBe('Hlavní město Praha');
+  });
+
+  it('uses the node itself when the country is its only ancestor', () => {
+    expect(resolveRegionName(NITRIANSKY)).toBe('Nitriansky kraj');
+    expect(resolveRegionName(VYSOCINA)).toBe('Vysočina kraj');
+  });
+
+  it('rejects a country node — "Slovensko" is not a region', () => {
+    expect(resolveRegionName(SLOVENSKO)).toBeNull();
+  });
+});
+
+/** Minimal page in the shape parseListingsPage reads. */
+function pageWith(rows: unknown[]): string {
+  const payload = JSON.stringify({ props: { pageProps: { searchRecords: { data: rows } } } });
+  return `<html><body><script id="__NEXT_DATA__" type="application/json">${payload}</script></body></html>`;
+}
+
+describe('autobazar.eu price currency', () => {
+  const czBase = {
+    id: 'cz1',
+    title: 'Skoda Octavia',
+    brandValue: 'Skoda',
+    carModelValue: 'Octavia',
+    location: OKRES_PRAHA,
+  };
+
+  it('takes finalPrice, not the CZK price, on a Czech advert', () => {
+    // Observed live: price 39 900 CZK alongside finalPrice 1 642.38 EUR.
+    const [row] = parseListingsPage(pageWith([{ ...czBase, price: 39900, finalPrice: 1642.38 }]));
+    expect(row?.priceEur).toBe(1642.38);
+    expect(row?.country).toBe('CZ');
+  });
+
+  it('yields no price rather than a CZK one when finalPrice is missing', () => {
+    // 39 900 CZK is ~1 640 EUR but sails through PRICE_MAX as if it were euros,
+    // so the only safe answer here is null.
+    const [row] = parseListingsPage(pageWith([{ ...czBase, price: 39900 }]));
+    expect(row?.priceEur).toBeNull();
+  });
+
+  it('still falls back to price on a Slovak advert', () => {
+    const [row] = parseListingsPage(
+      pageWith([{ ...czBase, id: 'sk1', location: ZILINA, price: 12500 }]),
+    );
+    expect(row?.priceEur).toBe(12500);
+    expect(row?.country).toBe('SK');
+  });
+
+  it('does not fall back when the country is unknown', () => {
+    const [row] = parseListingsPage(
+      pageWith([{ ...czBase, id: 'hu1', location: { name: 'Győr', parents: ['400000000'] }, price: 4500000 }]),
+    );
+    expect(row?.priceEur).toBeNull();
+    expect(row?.country).toBeNull();
   });
 });

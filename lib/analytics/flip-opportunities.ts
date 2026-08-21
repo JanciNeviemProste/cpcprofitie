@@ -17,7 +17,7 @@ import { getDb } from '@/lib/db';
 import { toBigInt } from '@/lib/db/bigint';
 import { flipOpportunities } from '@/lib/db/schema';
 import { buildExplainer, computeDealScore, estimateProfit } from './deal-score';
-import { plausiblePricedRaw } from './quality';
+import { marketReferenceRaw, plausiblePricedRaw } from './quality';
 
 export type FlipComputeStats = {
   candidatesScanned: number;
@@ -100,6 +100,12 @@ export async function computeFlipOpportunities(): Promise<FlipComputeStats> {
         AND l.is_vehicle = true
         AND ${plausiblePricedRaw('l')}
     ),
+    -- The reference these candidates are priced against, and the only side of
+    -- this query restricted to the Slovak market. active_canonical above is
+    -- deliberately left alone: a Czech car sitting well under the SLOVAK
+    -- median is precisely the arbitrage this product exists to find — the same
+    -- shape as a Danish import — so filtering both sides would delete the
+    -- opportunity instead of scoring it.
     cohort_pool AS (
       SELECT
         l.id,
@@ -117,8 +123,7 @@ export async function computeFlipOpportunities(): Promise<FlipComputeStats> {
         AND l.model_id IS NOT NULL
         AND l.year IS NOT NULL
         AND l.mileage_km IS NOT NULL
-        AND l.is_vehicle = true
-        AND ${plausiblePricedRaw('l')}
+        AND ${marketReferenceRaw('l')}
     ),
     cohort_agg AS (
       SELECT

@@ -3,6 +3,7 @@ import {
   bigint,
   bigserial,
   boolean,
+  char,
   date,
   index,
   integer,
@@ -121,6 +122,15 @@ export const listings = pgTable(
     fuel: fuelEnum('fuel'),
     transmission: transmissionEnum('transmission'),
     region: varchar('region', { length: 64 }),
+    // ISO-3166 alpha-2 of the market the advert sits in. NULL means unknown,
+    // never "assume Slovak" — autobazar.eu is a Czech-Slovak portal and the
+    // parser used to hardcode 'SK', which priced ~10 000 Czech cars into the
+    // Slovak reference. See 0014_listing_country.sql.
+    country: char('country', { length: 2 }),
+    // The town/district as the source names it, kept separate from `region` so
+    // the region can later be coarsened to a kraj without changing the
+    // fingerprint input. See 0014_listing_country.sql.
+    locality: varchar('locality', { length: 64 }),
     rawTitle: text('raw_title'),
     url: text('url').notNull(),
     rawJson: jsonb('raw_json'),
@@ -154,6 +164,7 @@ export const listings = pgTable(
     uniqueIndex('listings_source_source_id_idx').on(t.source, t.sourceId),
     index('listings_model_id_first_seen_idx').on(t.modelId, t.firstSeenAt),
     index('listings_region_idx').on(t.region),
+    index('listings_country_model_idx').on(t.country, t.modelId),
     index('listings_fingerprint_idx').on(t.fingerprint),
     index('listings_canonical_idx').on(t.canonicalListingId),
     index('listings_view_count_idx').on(t.viewCount),

@@ -12,7 +12,7 @@ import { getDb } from '@/lib/db';
 import { marketSnapshots } from '@/lib/db/schema';
 import { computeSnapshot, type SnapshotInput } from '@/lib/scraping/aggregate';
 import { isoWeekStart } from './dates';
-import { plausiblePricedRaw } from './quality';
+import { plausiblePricedRaw, slovakMarketRaw } from './quality';
 
 export type WeeklySnapshotStats = {
   cohortsComputed: number;
@@ -104,6 +104,12 @@ export async function computeWeeklySnapshots(
       -- and a mileage, but they reach here: a EUR 100 door joins a cohort and
       -- moves its median.
       AND l.is_vehicle = true
+      -- This snapshot IS the Slovak price reference, so a Czech car does not
+      -- belong in the cohort at all — not merely out of its median. The guard
+      -- sits here rather than inside marketReferenceRaw because this query
+      -- splits its conditions between WHERE and FILTER: sold rows must survive
+      -- the WHERE to be counted, so the price bounds cannot move up here.
+      AND ${slovakMarketRaw('l')}
       -- A car with no year or no mileage cannot be compared to anything. The
       -- CASEs above bucket both as 'unknown', which quietly gathers a 1998
       -- hatchback and a 2024 estate into one cohort and calls their midpoint a

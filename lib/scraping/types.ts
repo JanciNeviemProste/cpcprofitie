@@ -37,6 +37,15 @@ export type NormalizedListing = {
   fuel: RawFuel | null;
   transmission: RawTransmission | null;
   region: string | null;
+  /**
+   * ISO-3166 alpha-2 of the market the advert sits in, or null when the source
+   * gives no structural evidence. Null means "unknown", never "assume Slovak" —
+   * autobazar.eu is a Czech-Slovak portal and assuming was how ~10 000 Czech
+   * cars ended up priced into the Slovak reference.
+   */
+  country?: string | null;
+  /** The town/district as the source names it, before any region derivation. */
+  locality?: string | null;
   rawTitle: string | null;
   rawPayload: Record<string, unknown>;
   viewCount?: number | null;

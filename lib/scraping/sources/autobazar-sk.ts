@@ -125,6 +125,7 @@ export function parseListingsPage(html: string): NormalizedListing[] {
       fuel,
       transmission,
       region,
+      country: 'SK',
       rawTitle: title,
       rawPayload: { capturedAt: new Date().toISOString() },
       viewCount,

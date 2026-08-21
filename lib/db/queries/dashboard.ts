@@ -5,7 +5,7 @@
 import * as Sentry from '@sentry/nextjs';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
-import { plausibleListing } from '@/lib/analytics/quality';
+import { marketReference } from '@/lib/analytics/quality';
 import {
   garage,
   listings,
@@ -56,9 +56,9 @@ async function getTrendingModelsUnsafe(limit: number): Promise<TrendingItem[]> {
         // guard existed in exactly one query in the product — the weekly
         // snapshot — and was missing from every surface a visitor actually
         // reads.
-        sql`${listings.isVehicle} = true`,
-        // Keep implausible prices/mileage out of the median.
-        plausibleListing({
+        // Real vehicle, plausible price, Slovak market — the three guards a
+        // row must pass to price the Slovak market.
+        marketReference({
           priceEur: listings.priceEur,
           mileageKm: listings.mileageKm,
           year: listings.year,
@@ -173,8 +173,7 @@ async function getModelKpiUnsafe(slug: string): Promise<ModelKpi | null> {
         sql`${listings.soldAt} IS NULL`,
         // Same reason as getTrendingModelsUnsafe above: parts carry a brand and
         // model, so without this they price the model they were taken off.
-        sql`${listings.isVehicle} = true`,
-        plausibleListing({
+        marketReference({
           priceEur: listings.priceEur,
           mileageKm: listings.mileageKm,
           year: listings.year,

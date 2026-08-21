@@ -20,6 +20,88 @@ const BASE = 'https://www.autobazar.eu';
 
 const NEXT_DATA_RE = /<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/;
 
+/**
+ * A node in autobazar.eu's location tree. Every field is optional because the
+ * tree is walked from whichever depth the advert sits at: a listing's location
+ * may be a town, a district ("okres Praha"), a region, or the country itself.
+ */
+type RawLocation = {
+  id?: string | number | null;
+  name?: string | null;
+  /** Ancestors, nearest first, country last. Length 0-3. */
+  parentNames?: (string | null)[] | null;
+  /** Same order as parentNames. The last element is the country's node id. */
+  parents?: (string | number | null)[] | null;
+  defaultLang?: string | null;
+};
+
+// autobazar.eu is a Czech-Slovak portal and its location tree is the only
+// structural record of which country an advert sits in. The root node ids are
+// stable and country-specific; the site's own i18n dictionary enumerates a
+// dozen countries, so this map is deliberately explicit rather than a
+// "starts with 1 / starts with 2" rule that would silently mis-file a third.
+const COUNTRY_BY_ROOT_ID: Readonly<Record<string, string>> = {
+  '100000000': 'SK',
+  '200000000': 'CZ',
+};
+
+// Cross-check only. `defaultLang` is the node's default *language*, not its
+// country, so it can never be the primary signal — but a disagreement means
+// our root-id map has gone stale, and we would rather emit null than guess.
+const COUNTRY_BY_LANG: Readonly<Record<string, string>> = {
+  sk: 'SK',
+  cs: 'CZ',
+};
+
+/**
+ * ISO country for a location node, or null when it cannot be established.
+ *
+ * Reads the *last* element of `parents` rather than the node's own `id`:
+ * `location.id` is not always numeric (observed `0_i9128BtwC-IGpZQrnK` on a
+ * Bratislava advert), whereas the root ancestor id always is. `parents` is
+ * empty only when the node *is* the country, in which case its own id is the
+ * root id.
+ *
+ * Returns null — never a default — for unknown roots or when `defaultLang`
+ * contradicts the root id. An unknown country failing closed out of a
+ * Slovak-only reference is the safe direction; guessing 'SK' is the bug this
+ * function exists to fix.
+ */
+export function resolveCountry(loc: RawLocation | null | undefined): string | null {
+  if (!loc) return null;
+  const parents = Array.isArray(loc.parents) ? loc.parents : [];
+  const rootRaw = parents.length > 0 ? parents[parents.length - 1] : loc.id;
+  const byRoot = rootRaw == null ? null : (COUNTRY_BY_ROOT_ID[String(rootRaw)] ?? null);
+
+  const lang = typeof loc.defaultLang === 'string' ? loc.defaultLang.toLowerCase() : null;
+  const byLang = lang ? (COUNTRY_BY_LANG[lang] ?? null) : null;
+
+  if (byRoot && byLang && byRoot !== byLang) return null;
+  return byRoot ?? null;
+}
+
+/**
+ * The region ("kraj") a location sits in, or null.
+ *
+ * Indexes from the *end* of `parentNames` because its depth varies with how
+ * precise the advert's location is — observed 3 ("okres Žilina", "Žilinský
+ * kraj", "Slovensko"), 2 ("Bratislavský kraj", "Slovensko"), 1 ("Slovensko")
+ * and 0. The last element is always the country, so the region is at -2; when
+ * there is no -2 the node itself is the region (or the country, which
+ * `parentNames.length === 0` identifies and we reject).
+ */
+export function resolveRegionName(loc: RawLocation | null | undefined): string | null {
+  if (!loc) return null;
+  const names = (Array.isArray(loc.parentNames) ? loc.parentNames : []).filter(
+    (n): n is string => typeof n === 'string' && n.trim().length > 0,
+  );
+  // No ancestors means this node is the country. "Slovensko" is not a region.
+  if (names.length === 0) return null;
+  const raw = names.length >= 2 ? names[names.length - 2]! : (loc.name ?? null);
+  const trimmed = raw?.trim();
+  return trimmed ? trimmed : null;
+}
+
 type RawListing = {
   id?: string;
   title?: string | null;
@@ -34,7 +116,7 @@ type RawListing = {
   mileage?: number | null;
   fuelValue?: string | null;
   gearboxValue?: string | null;
-  location?: { name?: string | null } | null;
+  location?: RawLocation | null;
   bodyworkValue?: string | null;
   vin?: string | null;
   views?: number | null;
@@ -113,7 +195,16 @@ export function parseListingsPage(html: string): NormalizedListing[] {
     // URL, so we don't need to reconstruct the slug client-side.
     const url = `${BASE}/detail/x/${sourceId}/`;
 
-    const price = r.finalPrice ?? r.price ?? r.listPrice ?? null;
+    const country = resolveCountry(r.location);
+
+    // `finalPrice` is the only field guaranteed to be in EUR. On Czech adverts
+    // `price` carries CZK — measured ratios of 24.2-24.7 against finalPrice on
+    // the same row — and 39 900 CZK sails through PRICE_MAX (500 000) as if it
+    // were a euro price. So the non-EUR fallbacks are available only once the
+    // advert is known to be Slovak; anywhere else a missing finalPrice must
+    // yield null rather than a number in the wrong currency.
+    const price =
+      r.finalPrice ?? (country === 'SK' ? (r.price ?? r.listPrice ?? null) : null);
     const yearRaw = r.year ?? r.yearOfProduction ?? r.yearValue ?? null;
     const year =
       typeof yearRaw === 'number'
@@ -124,8 +215,13 @@ export function parseListingsPage(html: string): NormalizedListing[] {
     const mileage = r.mileage ?? null;
     const fuel = parseFuel(r.fuelValue ?? null);
     const transmission = parseTransmission(r.gearboxValue ?? null);
-    const regionRaw = r.location?.name ?? null;
-    const region = prefixRegion(regionRaw, 'SK');
+    // Granularity is deliberately unchanged here: `region` still carries the
+    // node's own name, only with a country prefix that is now read from the
+    // location tree instead of hardcoded 'SK'. Coarsening it to the kraj is a
+    // separate change because computeFingerprint hashes the region, and a
+    // coarser key collides — see the region-granularity work.
+    const locality = r.location?.name?.trim() || null;
+    const region = country ? prefixRegion(locality, country) : null;
 
     const viewsRaw = r.views ?? r.viewCount ?? null;
     const viewCount =
@@ -154,6 +250,8 @@ export function parseListingsPage(html: string): NormalizedListing[] {
       fuel,
       transmission,
       region,
+      country,
+      locality,
       rawTitle: title,
       rawPayload: { capturedAt: new Date().toISOString() },
       viewCount,

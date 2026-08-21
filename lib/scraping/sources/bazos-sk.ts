@@ -97,6 +97,10 @@ export function parseListingsPage(html: string): NormalizedListing[] {
       fuel,
       transmission,
       region: null, // bazos list-page has no location, populated by detail enrichment
+      // auto.bazos.sk is the Slovak site; bazos.cz is a separate domain and is
+      // not in ALL_SOURCES. Country is a property of the source here, not of
+      // anything the page says.
+      country: 'SK',
       rawTitle: title,
       rawPayload: thumbnailUrl
         ? { capturedAt: new Date().toISOString(), thumbnailUrl }

@@ -293,6 +293,8 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
       fuel: r.fuel,
       transmission: r.transmission,
       region: r.region,
+      country: r.country ?? null,
+      locality: r.locality ?? null,
       rawTitle: r.rawTitle,
       url: r.url,
       rawJson: r.rawPayload,
@@ -365,6 +367,11 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
             // location at all, so this was wiping region for 99.4% of bazoš
             // listings on every pass.
             region: sql`coalesce(excluded.region, ${listings.region})`,
+            // Same rule for country: a scrape that could not establish it
+            // must not erase one that could. Never coalesce the other way —
+            // an advert does not move between countries.
+            country: sql`coalesce(excluded.country, ${listings.country})`,
+            locality: sql`coalesce(excluded.locality, ${listings.locality})`,
             // Also guards against ensureModelId returning null on a transient
             // DB error, which would otherwise turn a blip into permanent loss.
             // Cannot resurrect a model the catalog merge cleared: the stored

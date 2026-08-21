@@ -237,10 +237,10 @@ export function extractTransmissionHintFromText(text: string | null | undefined)
 }
 
 /** Apply the SK-/CZ- prefix to a free-text region. No-op when already prefixed. */
-export function prefixRegion(region: string | null, country: 'SK' | 'CZ'): string | null {
+export function prefixRegion(region: string | null, country: string): string | null {
   if (!region) return null;
   const trimmed = region.trim();
   if (!trimmed) return null;
-  if (/^(SK|CZ)-/.test(trimmed)) return trimmed;
+  if (/^[A-Z]{2}-/.test(trimmed)) return trimmed;
   return `${country}-${trimmed}`;
 }
