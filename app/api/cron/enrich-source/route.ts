@@ -72,6 +72,8 @@ export async function POST(request: Request) {
       ? 'null-description'
       : payload.mode === 'null-price'
       ? 'null-price'
+      : payload.mode === 'null-country'
+        ? 'null-country'
       : payload.mode === 'null-locality'
         ? 'null-locality'
       : payload.mode === 'null-model'
@@ -86,6 +88,7 @@ export async function POST(request: Request) {
     mode === 'null-price' ||
     mode === 'null-model' ||
     mode === 'null-locality' ||
+    mode === 'null-country' ||
     mode === 'null-description';
   // Cursor carried across invocations so the driver walks the whole backfill
   // set once. Without it, rows that stay NULL after enrichment (Cena dohodou,

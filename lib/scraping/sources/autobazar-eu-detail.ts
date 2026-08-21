@@ -3,6 +3,7 @@
 // to scrape rendered DOM at all — we just JSON-parse the script tag.
 
 import { parseFuel, parseTransmission, prefixRegion, slugify } from '../normalize';
+import { resolveCountry } from './autobazar-eu';
 import type { NormalizedDetail, NormalizedListing, SellerType } from '../types';
 
 const NEXT_DATA_RE = /<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/;
@@ -43,7 +44,13 @@ type RawRecord = {
   price?: number | null;
   fuelValue?: string | null;
   gearboxValue?: string | null;
-  location?: { name?: string | null } | null;
+  location?: {
+    id?: string | number | null;
+    name?: string | null;
+    parentNames?: (string | null)[] | null;
+    parents?: (string | number | null)[] | null;
+    defaultLang?: string | null;
+  } | null;
 };
 
 type TrpcQuery = { queryKey?: unknown[]; state?: { data?: unknown } };
@@ -176,7 +183,12 @@ export function parseDetailPage(
         : null;
   const fuel = parseFuel(record.fuelValue ?? null);
   const transmission = parseTransmission(record.gearboxValue ?? null);
-  const region = prefixRegion(record.location?.name ?? null, 'SK');
+  // The same hardcoded 'SK' that put ~17 000 Czech cars into the Slovak
+  // reference lived here too. Fixing only the list parser would have let every
+  // detail enrichment write 'SK-Brno' straight back.
+  const country = resolveCountry(record.location);
+  const locality = record.location?.name?.trim() || null;
+  const region = country ? prefixRegion(locality, country) : null;
 
   const listingOverrides: NormalizedDetail['listingOverrides'] = {};
   if (year != null && year >= 1980 && year <= new Date().getFullYear() + 1)
@@ -186,6 +198,8 @@ export function parseDetailPage(
   if (fuel != null) listingOverrides.fuel = fuel;
   if (transmission != null) listingOverrides.transmission = transmission;
   if (region != null) listingOverrides.region = region;
+  if (country != null) listingOverrides.country = country;
+  if (locality != null) listingOverrides.locality = locality;
 
   // Identity for backfilling title-less/model-less stubs. Use the SAME slug
   // logic as the list parser (autobazar-eu.ts) so a detail-backfilled model_id

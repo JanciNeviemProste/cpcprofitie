@@ -133,6 +133,8 @@ export type NormalizedDetail = {
     transmission: RawTransmission;
     region: string;
     locality: string;
+    /** ISO country established from the detail page's location tree. */
+    country: string;
     /**
      * The detail page says the car is abroad, contradicting the source-level
      * assumption that every row on a national site is domestic. Clears

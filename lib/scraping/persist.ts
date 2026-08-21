@@ -731,6 +731,8 @@ export async function persistDetails(details: NormalizedDetail[]): Promise<Detai
         if (o.region != null) set.region = sql`coalesce(${listings.region}, ${o.region})`;
         if (o.locality != null)
           set.locality = sql`coalesce(${listings.locality}, ${o.locality})`;
+        if (o.country != null)
+          set.country = sql`coalesce(${listings.country}, ${o.country})`;
         // The only override that overwrites instead of filling a gap. Every
         // other field here is "the detail page knows more than the list card";
         // this one is "the detail page contradicts an assumption we made from

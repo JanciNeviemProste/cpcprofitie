@@ -11,6 +11,10 @@
 //   'null-locality'        — same shape, for rows enriched before the locality
 //                            was read from the meta tag. 'unenriched' cannot
 //                            reach them: they already have a detail row.
+//   'null-country'         — rows whose market is still unknown. This is what
+//                            the reference-tightening gate waits on, and the
+//                            detail page carries the location tree that
+//                            answers it.
 
 import { and, desc, eq, exists, gt, isNull, notExists, sql } from 'drizzle-orm';
 import { getDb } from '../db';
@@ -24,7 +28,8 @@ export type EnrichSelectMode =
   | 'null-description'
   | 'null-price'
   | 'null-model'
-  | 'null-locality';
+  | 'null-locality'
+  | 'null-country';
 
 export async function loadUnenrichedBatch(
   source: Source,
@@ -67,7 +72,10 @@ export async function loadUnenrichedBatch(
   const selectFilter =
     mode === 'null-description'
       ? nullDescriptionFilter
-      : mode === 'null-price' || mode === 'null-model' || mode === 'null-locality'
+      : mode === 'null-price' ||
+        mode === 'null-model' ||
+        mode === 'null-locality' ||
+        mode === 'null-country'
       ? and(
           // The target-column IS NULL among active listings, walked by an id
           // cursor so rows that stay NULL even after enrichment (e.g. gone)
@@ -76,7 +84,9 @@ export async function loadUnenrichedBatch(
             ? isNull(listings.priceEur)
             : mode === 'null-model'
               ? isNull(listings.modelId)
-              : isNull(listings.locality),
+              : mode === 'null-country'
+                ? isNull(listings.country)
+                : isNull(listings.locality),
           isNull(listings.canonicalListingId),
           isNull(listings.soldAt),
           isNull(listings.removedAt),
