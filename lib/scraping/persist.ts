@@ -728,7 +728,18 @@ export async function persistDetails(details: NormalizedDetail[]): Promise<Detai
         if (o.fuel != null) set.fuel = sql`coalesce(${listings.fuel}, ${o.fuel})`;
         if (o.transmission != null)
           set.transmission = sql`coalesce(${listings.transmission}, ${o.transmission})`;
-        if (o.region != null) set.region = sql`coalesce(${listings.region}, ${o.region})`;
+        // Fills a gap, and additionally corrects a country prefix the stored
+        // value gets wrong. Plain coalesce was not enough: once the detail page
+        // could establish country='CZ', 206 rows kept the 'SK-Brno' the list
+        // parser had written, because coalesce keeps whatever is already there.
+        // The town itself is left alone — only the two-letter market marker is
+        // restamped, and only when it disagrees.
+        if (o.region != null)
+          set.region = sql`CASE
+            WHEN ${listings.region} IS NULL THEN ${o.region}
+            WHEN left(${listings.region}, 2) <> left(${o.region}, 2) THEN ${o.region}
+            ELSE ${listings.region}
+          END`;
         if (o.locality != null)
           set.locality = sql`coalesce(${listings.locality}, ${o.locality})`;
         if (o.country != null)
