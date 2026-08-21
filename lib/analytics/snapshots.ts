@@ -48,8 +48,11 @@ export async function computeWeeklySnapshots(
   // sidesteps it without changing semantics.
   const weekStartLit = `'${weekStart.toISOString()}'::timestamptz`;
   // Marks the boundary between rows this run refreshed and rows left over
-  // from an earlier run of the same week. Taken before any write.
-  const runStartedAt = new Date();
+  // from an earlier run of the same week. Taken before any write, and
+  // inlined as a literal for the same reason as weekStartLit above: passing
+  // a Date through drizzle's parameter binding fails type resolution and
+  // the DELETE errors out.
+  const runStartedAtLit = `'${new Date().toISOString()}'::timestamptz`;
   const db = getDb();
 
   // One big SQL: group canonical listings by (model, year-bucket,
@@ -218,7 +221,7 @@ export async function computeWeeklySnapshots(
     DELETE FROM market_snapshots
     WHERE captured_on = ${sql.raw(weekStartLit)}
       AND period = 'week'
-      AND computed_at < ${runStartedAt}
+      AND computed_at < ${sql.raw(runStartedAtLit)}
   `);
 
   return {
