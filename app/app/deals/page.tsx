@@ -59,12 +59,14 @@ export default async function DealsPage({
   const sources = parseSources(sp.sources);
   const regions = parseList(sp.regions);
   const maxBudget = parseNum(sp.maxBudget);
+  const domesticOnly = sp.domesticOnly === '1';
 
   const filtersValue: DealsFiltersValue = {
     minScore,
     sources,
     regions,
     maxBudget: maxBudget ?? null,
+    domesticOnly,
   };
 
   const deals = await getTopDealsV2({
@@ -73,6 +75,7 @@ export default async function DealsPage({
     sources: sources.length > 0 ? sources : undefined,
     regions: regions.length > 0 ? regions : undefined,
     maxBudget,
+    domesticOnly,
   });
 
   const [hero, ...rest] = deals;

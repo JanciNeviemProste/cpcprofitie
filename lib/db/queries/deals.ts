@@ -185,6 +185,13 @@ export type GetTopDealsOpts = {
   minScore?: number;
   sources?: Source[];
   regions?: string[]; // kraj names
+  /**
+   * Hide adverts outside the Slovak market. Off by default: a foreign car
+   * priced under the Slovak median is the arbitrage this list exists to find,
+   * so it is labelled rather than withheld. This is for the dealer who does
+   * not want to drive.
+   */
+  domesticOnly?: boolean;
   maxBudget?: number;
   /** Only rows already enriched with deal_score (used by the landing page). */
   enrichedOnly?: boolean;
@@ -320,6 +327,12 @@ async function getTopDealsV2Unsafe(opts: GetTopDealsOpts): Promise<DealCard[]> {
         )})`
       : sql``;
 
+  // Unknown country passes with 'SK', matching the reference predicate: a row
+  // we have not placed yet is not evidence that the car is abroad.
+  const domesticFilter = opts.domesticOnly
+    ? sql`AND (l.country IS NULL OR l.country = 'SK')`
+    : sql``;
+
   const budgetFilter =
     opts.maxBudget != null && opts.maxBudget > 0
       ? sql`AND l.price_eur <= ${opts.maxBudget}`
@@ -369,6 +382,7 @@ async function getTopDealsV2Unsafe(opts: GetTopDealsOpts): Promise<DealCard[]> {
       ${sourcesFilter}
       ${regionFilter}
       ${budgetFilter}
+      ${domesticFilter}
       ${scoreFilter}
     ORDER BY ${EFFECTIVE_SCORE} DESC, fo.discount_pct DESC
     LIMIT ${limit}

@@ -14,6 +14,8 @@ export type DealsFiltersValue = {
   sources: Source[];
   regions: string[];
   maxBudget: number | null;
+  /** Hide adverts outside the Slovak market. Off by default — see the query. */
+  domesticOnly: boolean;
 };
 
 export function DealsFilters({ initial }: { initial: DealsFiltersValue }) {
@@ -25,6 +27,7 @@ export function DealsFilters({ initial }: { initial: DealsFiltersValue }) {
   const [maxBudget, setMaxBudget] = useState<string>(
     initial.maxBudget != null ? String(initial.maxBudget) : '',
   );
+  const [domesticOnly, setDomesticOnly] = useState(initial.domesticOnly);
   const [expanded, setExpanded] = useState(false);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -37,8 +40,9 @@ export function DealsFilters({ initial }: { initial: DealsFiltersValue }) {
     if (regions.length > 0) params.set('regions', regions.join(','));
     const budget = Number(maxBudget);
     if (Number.isFinite(budget) && budget > 0) params.set('maxBudget', String(Math.floor(budget)));
+    if (domesticOnly) params.set('domesticOnly', '1');
     return params.toString();
-  }, [minScore, sources, regions, maxBudget]);
+  }, [minScore, sources, regions, maxBudget, domesticOnly]);
 
   useEffect(() => {
     if (isFirst.current) {
@@ -72,6 +76,7 @@ export function DealsFilters({ initial }: { initial: DealsFiltersValue }) {
   const activeFilterCount =
     (sources.length > 0 ? 1 : 0) +
     (regions.length > 0 ? 1 : 0) +
+    (domesticOnly ? 1 : 0) +
     (maxBudget !== '' ? 1 : 0) +
     (minScore !== 70 ? 1 : 0);
 
@@ -234,6 +239,26 @@ export function DealsFilters({ initial }: { initial: DealsFiltersValue }) {
                     );
                   })}
                 </div>
+              </div>
+
+              <div>
+                <div className="mb-2 font-mono text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
+                  Trh
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDomesticOnly((v) => !v)}
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] transition-all',
+                    domesticOnly
+                      ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                      : 'border-foreground/10 text-muted-foreground hover:border-foreground/30 hover:text-foreground',
+                  )}
+                  title="Zahraničné vozidlá sa porovnávajú so slovenským mediánom — sú to príležitosti, len je po ne treba cestovať"
+                >
+                  Len slovenské
+                  {domesticOnly ? <X className="size-3" /> : null}
+                </button>
               </div>
             </div>
           </div>
