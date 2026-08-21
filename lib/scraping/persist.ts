@@ -731,6 +731,12 @@ export async function persistDetails(details: NormalizedDetail[]): Promise<Detai
         if (o.region != null) set.region = sql`coalesce(${listings.region}, ${o.region})`;
         if (o.locality != null)
           set.locality = sql`coalesce(${listings.locality}, ${o.locality})`;
+        // The only override that overwrites instead of filling a gap. Every
+        // other field here is "the detail page knows more than the list card";
+        // this one is "the detail page contradicts an assumption we made from
+        // the domain name", and leaving country='SK' on a car the seller filed
+        // under Zahraničie would keep a foreign price in the Slovak reference.
+        if (o.foreignLocality === true) set.country = sql`NULL`;
         if (o.priceEur != null) {
           set.priceEur = sql`coalesce(${listings.priceEur}, ${String(o.priceEur)})`;
           // A price read off the detail page is a real observation, so it

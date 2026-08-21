@@ -133,6 +133,13 @@ export type NormalizedDetail = {
     transmission: RawTransmission;
     region: string;
     locality: string;
+    /**
+     * The detail page says the car is abroad, contradicting the source-level
+     * assumption that every row on a national site is domestic. Clears
+     * `country` rather than filling it: we learn the row is NOT Slovak, not
+     * which country it is in.
+     */
+    foreignLocality: boolean;
     priceEur: number;
   }>;
 };

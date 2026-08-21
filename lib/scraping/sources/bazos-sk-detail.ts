@@ -59,6 +59,9 @@ export function detailUrl(listing: NormalizedListing): string {
 // "Lokalita: Detva. Popis: …", so without the full stop the value swallows
 // the whole advert; the body-text fallback has no punctuation after the town
 // at all, so the other terminators still have to be there.
+// Values bazoš uses to say the car is not in the country.
+const FOREIGN_LOCALITIES = new Set(['zahranicie', 'zahraničie']);
+
 const LOCALITY_RE = /Lokalita:[ \t]*([^\n.,;]{1,48}?)[ \t]*(?:[\n.,;]|[ \t]{2,}|$)/i;
 
 export function extractLocality(
@@ -148,7 +151,13 @@ export function parseDetailPage(html: string, listing: NormalizedListing): Norma
   const transHint = extractAfterLabel(labelText, 'Prevodovka');
   const transmission = parseTransmission(extractTransmissionHintFromText(transHint ?? ''));
   const locality = extractLocality($, labelText);
-  const region = prefixRegion(locality, 'SK');
+  // bazoš offers "Zahraničie" as a locality, so the site itself says the car is
+  // not in Slovakia. The list page has no locality at all, which is why the
+  // source-level assumption ("auto.bazos.sk is the Slovak site") writes
+  // country='SK' on every row — this is the one place that assumption can be
+  // contradicted by evidence, and it must win over it.
+  const abroad = locality != null && FOREIGN_LOCALITIES.has(locality.toLowerCase());
+  const region = abroad ? null : prefixRegion(locality, 'SK');
 
   // Price: anchor to the listing's own `.inzeratycena` element — NEVER a bare
   // "N €" span from the page. Bazoš detail pages render a sidebar of related
@@ -169,6 +178,7 @@ export function parseDetailPage(html: string, listing: NormalizedListing): Norma
   if (transmission != null) listingOverrides.transmission = transmission;
   if (region != null) listingOverrides.region = region;
   if (locality != null) listingOverrides.locality = locality;
+  if (abroad) listingOverrides.foreignLocality = true;
 
   // Identity backfill for title-less/model-less legacy stubs. The detail page
   // carries the full title in <h1> (verified live: "Ford Kuga 1.5 Ecoboost
