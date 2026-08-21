@@ -34,6 +34,49 @@ export function detailUrl(listing: NormalizedListing): string {
   return listing.url;
 }
 
+/**
+ * The town the car is in.
+ *
+ * Read from `<meta name="description">` rather than the description block. The
+ * `.popisdetail` scoping above exists because page-wide text carries a
+ * sidebar of OTHER listings, and it does its job for year and mileage — but
+ * bazoš simply does not put the locality in that block. Measured on live
+ * pages: the meta tag sits at byte ~170 and `.popisdetail` starts past byte
+ * 16 000, which is why the region was populated on 0.5% of the source.
+ *
+ * A `<meta>` in `<head>` is per-document by construction, so the sidebar
+ * cannot reach it — this is strictly safer than the block, not a relaxation of
+ * the guard.
+ *
+ * Deliberately NOT extractAfterLabel: that regex terminates on a comma,
+ * semicolon or newline but not a full stop, so on the real string
+ * "…Lokalita: Detva. Popis: Preedám Mercedes…" it returns 79 characters of
+ * advert prose. That is worse than the NULL it replaces — it fits varchar(64)
+ * only after truncation and would be stored as a place name.
+ */
+// Ends on a full stop as well as the comma/semicolon/newline/double-space
+// that extractAfterLabel stops on. The meta tag runs the labels together as
+// "Lokalita: Detva. Popis: …", so without the full stop the value swallows
+// the whole advert; the body-text fallback has no punctuation after the town
+// at all, so the other terminators still have to be there.
+const LOCALITY_RE = /Lokalita:[ \t]*([^\n.,;]{1,48}?)[ \t]*(?:[\n.,;]|[ \t]{2,}|$)/i;
+
+export function extractLocality(
+  $: cheerio.CheerioAPI,
+  fallbackText: string,
+): string | null {
+  const meta = $('meta[name="description"]').attr('content') ?? null;
+  for (const source of [meta, fallbackText]) {
+    if (!source) continue;
+    const m = LOCALITY_RE.exec(source);
+    const value = m?.[1]?.trim();
+    // Sellers write prose; a "locality" longer than any Slovak place name is
+    // the parser having walked off the end of the label, not a place.
+    if (value && value.length > 0 && value.length <= 48) return value;
+  }
+  return null;
+}
+
 export function parseDetailPage(html: string, listing: NormalizedListing): NormalizedDetail {
   const $ = cheerio.load(html);
 
@@ -104,8 +147,8 @@ export function parseDetailPage(html: string, listing: NormalizedListing): Norma
   const fuel = parseFuel(extractFuelHintFromText(fuelHint ?? ''));
   const transHint = extractAfterLabel(labelText, 'Prevodovka');
   const transmission = parseTransmission(extractTransmissionHintFromText(transHint ?? ''));
-  const locRaw = extractAfterLabel(labelText, 'Lokalita');
-  const region = prefixRegion(locRaw, 'SK');
+  const locality = extractLocality($, labelText);
+  const region = prefixRegion(locality, 'SK');
 
   // Price: anchor to the listing's own `.inzeratycena` element — NEVER a bare
   // "N €" span from the page. Bazoš detail pages render a sidebar of related
@@ -125,6 +168,7 @@ export function parseDetailPage(html: string, listing: NormalizedListing): Norma
   if (fuel != null) listingOverrides.fuel = fuel;
   if (transmission != null) listingOverrides.transmission = transmission;
   if (region != null) listingOverrides.region = region;
+  if (locality != null) listingOverrides.locality = locality;
 
   // Identity backfill for title-less/model-less legacy stubs. The detail page
   // carries the full title in <h1> (verified live: "Ford Kuga 1.5 Ecoboost

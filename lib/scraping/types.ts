@@ -132,6 +132,7 @@ export type NormalizedDetail = {
     fuel: RawFuel;
     transmission: RawTransmission;
     region: string;
+    locality: string;
     priceEur: number;
   }>;
 };

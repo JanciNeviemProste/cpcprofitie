@@ -729,6 +729,8 @@ export async function persistDetails(details: NormalizedDetail[]): Promise<Detai
         if (o.transmission != null)
           set.transmission = sql`coalesce(${listings.transmission}, ${o.transmission})`;
         if (o.region != null) set.region = sql`coalesce(${listings.region}, ${o.region})`;
+        if (o.locality != null)
+          set.locality = sql`coalesce(${listings.locality}, ${o.locality})`;
         if (o.priceEur != null) {
           set.priceEur = sql`coalesce(${listings.priceEur}, ${String(o.priceEur)})`;
           // A price read off the detail page is a real observation, so it

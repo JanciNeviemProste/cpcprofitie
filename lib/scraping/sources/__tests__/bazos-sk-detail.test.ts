@@ -325,3 +325,42 @@ describe('bazos.sk detail — the mileage formats sellers actually write', () =>
     expect(parse('Vyborna spotreba cca 5.2 lit. /100 km')).toBeUndefined();
   });
 });
+
+describe('bazos.sk locality', () => {
+  // The region was populated on 0.5% of the biggest source because the parser
+  // looked for "Lokalita" inside .popisdetail, where bazoš never puts it. It
+  // is in <meta name="description">, which a sidebar cannot reach.
+  it('reads the town from the meta description', () => {
+    const rv = parseDetailPage(DEALER_RV, stub('194711273', 'https://auto.bazos.sk/inzerat/194711273/x.php'));
+    expect(rv.listingOverrides?.locality).toBe('Poprad');
+    expect(rv.listingOverrides?.region).toBe('SK-Poprad');
+
+    const ev = parseDetailPage(
+      DEALER_EVIDENCIA,
+      stub('194708206', 'https://auto.bazos.sk/inzerat/194708206/x.php'),
+    );
+    expect(ev.listingOverrides?.locality).toBe('Levice');
+  });
+
+  it('stops at the full stop, not at the next comma', () => {
+    // extractAfterLabel terminates on , ; or newline but NOT on '.', so on the
+    // real string "Lokalita: Detva. Popis: Preedám Mercedes… 358000 km." it
+    // returned 79 characters of advert prose — worse than the NULL it replaced,
+    // because it fits varchar(64) after truncation and reads as a place name.
+    for (const html of [DEALER_RV, DEALER_EVIDENCIA]) {
+      const d = parseDetailPage(html, stub('1', 'https://auto.bazos.sk/inzerat/1/x.php'));
+      const loc = d.listingOverrides?.locality;
+      expect(loc).toBeDefined();
+      expect(loc!.length).toBeLessThanOrEqual(48);
+      expect(loc).not.toContain('Popis');
+      expect(loc).not.toContain('.');
+    }
+  });
+
+  it('does not let the sidebar reach year or mileage', () => {
+    // The .popisdetail scoping stays exactly as it was: only the locality moved
+    // to the meta tag.
+    const d = parseDetailPage(DEALER_RV, stub('194711273', 'https://auto.bazos.sk/inzerat/194711273/x.php'));
+    expect(d.listingOverrides?.year).not.toBe(2021);
+  });
+});
