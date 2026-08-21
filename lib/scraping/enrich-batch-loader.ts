@@ -8,6 +8,9 @@
 //                            of enrichment status. Backfills price from the
 //                            detail page for old rows scraped before the
 //                            listing-page parser extracted price.
+//   'null-locality'        — same shape, for rows enriched before the locality
+//                            was read from the meta tag. 'unenriched' cannot
+//                            reach them: they already have a detail row.
 
 import { and, desc, eq, exists, gt, isNull, notExists, sql } from 'drizzle-orm';
 import { getDb } from '../db';
@@ -20,7 +23,8 @@ export type EnrichSelectMode =
   | 'unenriched-newest'
   | 'null-description'
   | 'null-price'
-  | 'null-model';
+  | 'null-model'
+  | 'null-locality';
 
 export async function loadUnenrichedBatch(
   source: Source,
@@ -63,12 +67,16 @@ export async function loadUnenrichedBatch(
   const selectFilter =
     mode === 'null-description'
       ? nullDescriptionFilter
-      : mode === 'null-price' || mode === 'null-model'
+      : mode === 'null-price' || mode === 'null-model' || mode === 'null-locality'
       ? and(
           // The target-column IS NULL among active listings, walked by an id
           // cursor so rows that stay NULL even after enrichment (e.g. gone)
           // don't get re-selected forever.
-          mode === 'null-price' ? isNull(listings.priceEur) : isNull(listings.modelId),
+          mode === 'null-price'
+            ? isNull(listings.priceEur)
+            : mode === 'null-model'
+              ? isNull(listings.modelId)
+              : isNull(listings.locality),
           isNull(listings.canonicalListingId),
           isNull(listings.soldAt),
           isNull(listings.removedAt),

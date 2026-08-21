@@ -72,6 +72,8 @@ export async function POST(request: Request) {
       ? 'null-description'
       : payload.mode === 'null-price'
       ? 'null-price'
+      : payload.mode === 'null-locality'
+        ? 'null-locality'
       : payload.mode === 'null-model'
         ? 'null-model'
         : payload.mode === 'unenriched-newest'
@@ -81,7 +83,10 @@ export async function POST(request: Request) {
   // (gone pages, adverts with no price) sit at the head of the set and would
   // be re-fetched on every invocation without one.
   const isBackfill =
-    mode === 'null-price' || mode === 'null-model' || mode === 'null-description';
+    mode === 'null-price' ||
+    mode === 'null-model' ||
+    mode === 'null-locality' ||
+    mode === 'null-description';
   // Cursor carried across invocations so the driver walks the whole backfill
   // set once. Without it, rows that stay NULL after enrichment (Cena dohodou,
   // gone) sit at the head and every invocation re-fetches them → livelock.
