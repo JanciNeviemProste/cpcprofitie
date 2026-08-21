@@ -18,6 +18,8 @@ export type WeeklySnapshotStats = {
   cohortsComputed: number;
   rowsUpserted: number;
   modelsScanned: number;
+  /** Cohorts that existed last run and no longer qualify — see the delete. */
+  staleCohortsPurged: number;
 };
 
 export { isoWeekStart };
@@ -45,6 +47,9 @@ export async function computeWeeklySnapshots(
   // (pg adapter sends ambiguous type). String literal + ::timestamptz cast
   // sidesteps it without changing semantics.
   const weekStartLit = `'${weekStart.toISOString()}'::timestamptz`;
+  // Marks the boundary between rows this run refreshed and rows left over
+  // from an earlier run of the same week. Taken before any write.
+  const runStartedAt = new Date();
   const db = getDb();
 
   // One big SQL: group canonical listings by (model, year-bucket,
@@ -198,10 +203,29 @@ export async function computeWeeklySnapshots(
     });
   }
 
+  // Drop cohorts that no longer qualify this week.
+  //
+  // The upsert alone never removes anything, so a cohort that falls below the
+  // floor — or stops existing — keeps serving whatever median it last had.
+  // That stayed invisible while cohorts rarely vanished; scoping the reference
+  // to the Slovak market retired 742 of them at once, of which 274 were still
+  // above the publish floor and still being served with their old,
+  // Czech-contaminated medians.
+  //
+  // Scoped to this week's captured_on only. Earlier weeks are measurements of
+  // a week that cannot be recomputed and are never touched.
+  const purged = await db.execute(sql`
+    DELETE FROM market_snapshots
+    WHERE captured_on = ${sql.raw(weekStartLit)}
+      AND period = 'week'
+      AND computed_at < ${runStartedAt}
+  `);
+
   return {
     cohortsComputed: rows.length,
     rowsUpserted: upserted,
     modelsScanned: modelsSeen.size,
+    staleCohortsPurged: (purged as unknown as { count?: number }).count ?? 0,
   };
 }
 
