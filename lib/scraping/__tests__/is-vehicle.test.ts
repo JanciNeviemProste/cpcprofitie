@@ -68,3 +68,48 @@ describe('isVehicleTitle', () => {
     expect(isVehicleTitle('')).toBe(true);
   });
 });
+
+describe('isVehicleTitle — second round of stems', () => {
+  it('flags the part categories bazoš actually sells', () => {
+    // A sample of 20 bazoš rows marked is_vehicle with no year, mileage or
+    // model was 20 parts out of 20. These are the categories behind that.
+    for (const title of [
+      'Riadiaca jednotka motora Peugeot 407 2.0 HDI 5WS40167H-T',
+      'Brzdové kotúče Renault,Nissan',
+      'Originálne predné tlmiče MOPAR – Dodge Nitro / Jeep Cherokee',
+      'Predam sériové autorádio skoda octavia 2004',
+      'AUDI A4 B8 ZADNE SVETLO 8K9945093',
+      'Spätné zrkadlo na Fiat Croma II',
+      'Poťahy originál na Peugeot sw407',
+      'Gumené autorohože+vanička do kufra',
+      'Predna mriezka chrom BMW 5 G30/G31 (LCI od 2020)',
+    ]) {
+      expect(isVehicleTitle(title)).toBe(false);
+    }
+  });
+
+  it('leaves alone the cars these stems were tempting on', () => {
+    // Every title here is a real advert with a year and a mileage, and every
+    // one of them killed a candidate stem: pneumatik, vyfuk, chladic,
+    // svetlomet, dvere, kryt, priecnik. A refrigerated Sprinter is the vehicle,
+    // a sports exhaust is a selling point, and LED headlights are equipment.
+    for (const title of [
+      'Honda Jazz 1.4 Comfort AT nový rozvodový remeň, 2x sada pneumatík',
+      'Toyota RAV4 2.5 PHEV Dynamic + ťažné zariadenie + zimné pneumatiky',
+      'Porsche Panamera 4S - športový výfuk + výbava nadštandard',
+      'BMW Rad 3 M340i xDrive mHEV - RCP výfuk bez OPF',
+      'Mercedes-Benz Sprinter chladící',
+      'Citroën Jumper L3H2 chladící',
+      'Škoda Superb Combi 2.0 TDi 150k Executive DSG, full LED svetlomety',
+      'Citroën Berlingo - ZADNE DVERE DO STRAN',
+      'Dodge RAM 5.7 V8 Laramie. Kryt korby',
+      'Dongfeng T5 EVO + box a priečniky zdarma',
+      // Still guarded from the first round.
+      'BMW 118i 5-dverové',
+      'Kia Ceed hatchback, 5 dverí',
+      'ventilované sedadlá',
+    ]) {
+      expect(isVehicleTitle(title)).toBe(true);
+    }
+  });
+});

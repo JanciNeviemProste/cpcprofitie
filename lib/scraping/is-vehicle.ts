@@ -44,6 +44,24 @@ const PART_STEMS = [
   'sada kolies',
   'rozpredam', // breaking for parts — not a car on sale either
   'kupim', // a wanted ad, no price of its own to average
+  // Added 2026-08-21. Each was measured the same way as the originals: count
+  // the titles carrying the stem that ALSO carry a year and a mileage, which
+  // is as close to a known-cars set as this data offers. Every stem below
+  // scored zero there, or scored only on rows that are themselves parts
+  // ("ALTERNáTOR", "Predna mriezka chrom BMW 5") wrongly carrying a year.
+  'riadiaca jednotka',
+  'alternator',
+  'brzdov',
+  'tlmic',
+  'autoradio',
+  'zadne svetlo',
+  'spatne zrkadlo',
+  'potah',
+  'snehove retaze',
+  'autobateria',
+  'nosic bicyklov',
+  'autorohoz',
+  'mriezka',
 ];
 
 //
@@ -61,6 +79,27 @@ const PART_STEMS = [
 //   svetla   "Skoda superb 2,0 TDi dsg 2022 full led svetla"
 //   kufor    "BMW X3 xDrive20d A/T/Led/El.kufor/Virtual"
 //   motor    the most common word in a genuine ad ("motor 2.0 TDI, 110 kW")
+//
+// A second round in 2026-08-21 rejected more than it accepted. Each of these
+// looked obvious and each sits on real cars:
+//
+//   pneumatik  "Honda Jazz 1.4 Comfort AT ... 2x sada pneumatík",
+//              "Toyota RAV4 PHEV ... + zimné pneumatiky" — the same trap as
+//              `pneu`, one suffix further along
+//   vyfuk      "Porsche Panamera 4S - športový výfuk", "BMW M340i - RCP výfuk
+//              bez OPF", "Audi RS6 ... Milltek" — a sports exhaust is a
+//              selling point, not the thing for sale
+//   chladic    "Mercedes-Benz Sprinter chladící", "Citroën Jumper L3H2
+//              chladící" — a refrigerated van IS the vehicle
+//   svetlomet  "Škoda Superb ... full LED svetlomety" — equipment again
+//   dvere      "Citroën Berlingo - ZADNE DVERE DO STRAN". `dver` was already
+//              rejected for "5-dverové"; the longer stem escapes those but
+//              still catches a van described by its doors
+//   kryt       "Dodge RAM 5.7 V8 Laramie. Kryt korby"
+//   priecnik   "Dongfeng T5 EVO + box a priečniky zdarma"
+//   lista      matches inside "špecialista"; obal matches inside "kobalt" —
+//              short substrings that happen to score zero today and would
+//              start deleting cars the moment a dealer renames themselves
 //
 // Doors are the painful one: "Ľavé bočné dvere Škoda Fabia" is exactly what
 // this was built to catch, and it cannot be caught without also flagging every

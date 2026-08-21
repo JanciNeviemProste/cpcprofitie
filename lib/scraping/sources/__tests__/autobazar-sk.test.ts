@@ -93,26 +93,40 @@ describe('autobazar.sk parseListingsPage', () => {
 });
 
 describe('autobazar.sk pageUrl', () => {
-  // The source sat at ~700 listings because every page returned brand page one.
-  // `?page=`, `/2/` and `?strana=` are all ignored by the site; `?p[page]=` is
-  // the one that actually advances.
-  it('starts each brand on its bare subdomain', () => {
-    expect(autobazarSk.pageUrl({ page: 1 })).toBe('https://audi.autobazar.sk/');
+  // Two bugs are pinned here. The source once sat at ~700 listings because
+  // every page returned page one: `?page=`, `/2/` and `?strana=` are all
+  // ignored by the site, `?p[page]=` is the one that advances. The fix for
+  // that walked 35 brand subdomains, which left a worse problem — a brand
+  // outside the list could never be seen at all.
+  it('walks the whole catalogue, not a list of brands', () => {
+    expect(autobazarSk.pageUrl({ page: 1 })).toBe('https://osobne-auta.autobazar.sk/');
+    expect(autobazarSk.pageUrl({ page: 2 })).toBe(
+      'https://osobne-auta.autobazar.sk/?p[page]=2',
+    );
+    expect(autobazarSk.pageUrl({ page: 1001 })).toBe(
+      'https://osobne-auta.autobazar.sk/?p[page]=1001',
+    );
   });
 
-  it('paginates within a brand using the array-style key', () => {
-    expect(autobazarSk.pageUrl({ page: 2 })).toBe('https://audi.autobazar.sk/?p[page]=2');
-    expect(autobazarSk.pageUrl({ page: 25 })).toBe('https://audi.autobazar.sk/?p[page]=25');
+  it('never pins itself to a brand', () => {
+    // A brand subdomain here means the catalogue is being read through a
+    // keyhole again: Cupra, DS, Polestar and Jaecoo all exist on this site and
+    // none was in the old list.
+    for (const page of [1, 2, 26, 500, 1001]) {
+      expect(autobazarSk.pageUrl({ page })).toContain('osobne-auta.autobazar.sk');
+    }
   });
 
-  it('moves to the next brand once a brand is exhausted', () => {
-    expect(autobazarSk.pageUrl({ page: 26 })).toBe('https://bmw.autobazar.sk/');
-    expect(autobazarSk.pageUrl({ page: 27 })).toBe('https://bmw.autobazar.sk/?p[page]=2');
-  });
-
-  it('covers every brand before wrapping', () => {
+  it('gives every page in the space a distinct url', () => {
     const urls = new Set<string>();
-    for (let p = 1; p <= 35 * 25; p += 25) urls.add(autobazarSk.pageUrl({ page: p }));
-    expect(urls.size).toBe(35);
+    for (let p = 1; p <= 1001; p++) urls.add(autobazarSk.pageUrl({ page: p }));
+    expect(urls.size).toBe(1001);
+  });
+
+  it('stops at the measured ceiling', () => {
+    // 1001 serves, 1002 is a 404 (measured 2026-08-21). Declaring a much
+    // larger space would make every cycle walk the difference in 404s before
+    // the walker accepts the source is exhausted.
+    expect(autobazarSk.maxPage).toBe(1001);
   });
 });

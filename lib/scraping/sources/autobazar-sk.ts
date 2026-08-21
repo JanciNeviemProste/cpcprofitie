@@ -138,76 +138,51 @@ export function parseListingsPage(html: string): NormalizedListing[] {
 }
 
 // autobazar.sk client-side renders the main /inzeraty/ listing — server HTML
-// only contains the featured panel (~20 listings) and ignores ?page=N. Brand
-// subdomains (e.g. audi.autobazar.sk) DO server-render per-brand pages with
-// 20 unique listings each, and they paginate.
+// only contains the featured panel (~20 listings) and ignores ?page=N. The
+// per-category subdomains DO server-render paginated pages of 20 unique
+// listings each.
 //
 // The pagination parameter is `?p[page]=N` — an array-style query key. Plain
 // `?page=`, `/2/` and `?strana=` all return page one again, which is how this
-// source sat at ~700 listings while the brands hold roughly ten times that
-// (audi 345, bmw 403, skoda 328, ford 234, volkswagen 216 — measured 2026-08-19).
+// source sat at ~700 listings while the site holds roughly thirty times that.
 // Nothing errored: repeated pages deduplicated on upsert and the run reported
 // success with added: 0.
-/** Pages walked per brand before moving to the next one. */
-const PAGES_PER_BRAND = 25;
-
-const TOP_BRANDS = [
-  'audi',
-  'bmw',
-  'skoda',
-  'volkswagen',
-  'mercedes',
-  'ford',
-  'kia',
-  'hyundai',
-  'opel',
-  'peugeot',
-  'renault',
-  'toyota',
-  'volvo',
-  'mazda',
-  'nissan',
-  'fiat',
-  'citroen',
-  'seat',
-  'honda',
-  'suzuki',
-  'dacia',
-  'land-rover',
-  'mini',
-  'jeep',
-  'mitsubishi',
-  'jaguar',
-  'alfa-romeo',
-  'lexus',
-  'porsche',
-  'smart',
-  'tesla',
-  'chevrolet',
-  'chrysler',
-  'dodge',
-  'subaru',
-];
+//
+// This used to walk a fixed list of 35 brand subdomains, 25 pages each. That
+// fixed the pagination bug but left a worse one behind: a brand outside the
+// list was not merely under-covered, it was INVISIBLE — no number of cycles
+// would ever surface a Cupra, a DS, a Polestar or a Jaecoo. It also burned
+// fetches, because a brand with 12 pages of stock repeated its last page for
+// the remaining 13 slots.
+//
+// osobne-auta.autobazar.sk is the same markup without the brand restriction.
+// Measured 2026-08-21: pages 1, 2, 50, 200, 500, 900, 950 and 1000 each return
+// 20 listings with no overlap between them (120 distinct ids across 6 sampled
+// pages), and the walk ends sharply — 1001 serves, 1002 is a 404.
+//
+// So the space is 1 001 pages ≈ 20 020 listings. Note that this is a CAP, not
+// necessarily the size of the catalogue: if the site ever holds more than
+// 20 020 cars, whatever sorts last becomes unreachable here and the fix is to
+// walk narrower slices (by brand, or by bodywork) rather than to raise this
+// number. The freshness and completeness watchdogs are what would show it.
+const MAX_PAGE = 1001;
 
 export const autobazarSk: ScraperSource = {
   id: 'autobazar.sk',
   baseUrl: BASE,
   pageUrl({ page }) {
-    // `page` walks brands and their pages as one flat sequence: pages 1..25 are
-    // the first brand, 26..50 the second, and so on. 25 covers the largest
-    // brand (~21 pages); smaller ones repeat their last page, which upsert
-    // deduplicates.
-    const p = Math.max(1, page) - 1;
-    const brand = TOP_BRANDS[Math.floor(p / PAGES_PER_BRAND) % TOP_BRANDS.length] ?? 'audi';
-    const brandPage = (p % PAGES_PER_BRAND) + 1;
-    return brandPage === 1
-      ? `https://${brand}.autobazar.sk/`
-      : `https://${brand}.autobazar.sk/?p[page]=${brandPage}`;
+    const p = Math.max(1, page);
+    // Page one is the bare subdomain; every later page takes the array-style
+    // query key. Same shape the brand subdomains used.
+    return p === 1
+      ? 'https://osobne-auta.autobazar.sk/'
+      : `https://osobne-auta.autobazar.sk/?p[page]=${p}`;
   },
-  // Brands × pages is a ragged rectangle flattened into a rectangle, so a 404
-  // partway through is a short brand, not the end of the source. Only a 404
-  // past this bound means there is nothing left.
-  maxPage: TOP_BRANDS.length * PAGES_PER_BRAND,
+  // A linear list, so a 404 really is the end — unlike the old brand walk,
+  // where a short brand produced one mid-sequence. Kept close to the measured
+  // ceiling on purpose: set it far above and every cycle burns the difference
+  // in pointless 404s before the walker agrees the source is exhausted.
+  maxPage: MAX_PAGE,
   parseListingsPage,
   detailUrl,
   parseDetailPage,
