@@ -297,6 +297,16 @@ export async function upsertListings(rows: NormalizedListing[]): Promise<UpsertC
       url: r.url,
       rawJson: r.rawPayload,
       fingerprint,
+      // Stamped on insert too, not only on update. A first scrape reads the
+      // price like any other, so leaving it null made every newly discovered
+      // listing look unverified — 12 000 arrived from bazoš's deeper pages in
+      // one night and dragged that source's freshness to 71%, firing an alert
+      // about a crawler that was in fact working perfectly.
+      //
+      // Not the same question as first_seen_alive_at, which is deliberately
+      // absent here: a first sighting is not evidence the advert is live, but
+      // it IS evidence of what its price said.
+      priceCheckedAt: r.priceEur != null ? new Date() : null,
       viewCount: r.viewCount ?? null,
       isFeatured: r.isFeatured === true,
       sellerPhone: r.sellerPhone ?? null,
