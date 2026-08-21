@@ -119,10 +119,29 @@ const PART_DIMENSION_RE = /\b\d{3}\s*\/\s*\d{2}\s*r\s*\d{2}\b|\b[456]\s*x\s*1[0-
  *  inside "Renault Trafic", which folds to "trafik". */
 const RIM_RE = /\brafik/;
 
+/**
+ * A wheel diameter written straight onto the word: "19disky", '20" DISKY'.
+ *
+ * On a genuine advert this is the last item in a list of equipment — "BMW X3
+ * 30D XDRIVE, M-SPORT, 210KW, SK ŠPZ, LASER, ŤAŽNÉ, 20" DISKY, WEBASTO" — and
+ * the bare `disky` stem was deleting those cars from the market. Measured: five
+ * of them, each priced over EUR 3 000 and carrying a year, a mileage and a
+ * model.
+ *
+ * Genuine wheel ads are not lost by this. They almost always state a tyre size
+ * or a bolt pattern ("Hliníkové disky 5x112 R17", "ALU DISKY 205/60 R16"),
+ * which PART_DIMENSION_RE catches first; and one with neither ("Disky Breyton")
+ * has no diameter glued to the word, so the stem still fires.
+ */
+const WHEEL_SIZE_AS_EQUIPMENT_RE = /(?:1[3-9]|2[0-4])\s*["″']?\s*disk/i;
+
 export function isVehicleTitle(title: string | null | undefined): boolean {
   if (!title) return true; // Nothing to judge on — assume a car and leave it in.
   const t = fold(title);
   if (PART_DIMENSION_RE.test(t) || RIM_RE.test(t)) return false;
+  // A diameter glued to the word names the car's wheels, not the thing for
+  // sale. Checked before the stems so `disky` cannot fire on it.
+  if (WHEEL_SIZE_AS_EQUIPMENT_RE.test(t)) return true;
   return !PART_STEMS.some((stem) => t.includes(stem));
 }
 
