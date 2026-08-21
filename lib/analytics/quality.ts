@@ -50,25 +50,28 @@ export function plausiblePricedRaw(alias: string): SQL {
  * The market this product describes. Everything outside it is excluded from
  * the price reference — not from the product.
  *
- * `country IS NULL` passes deliberately. autobazar.eu rows only gain a country
- * when the rotation re-reads them, and a hard `= 'SK'` would drop tens of
- * thousands of rows we know nothing bad about. This predicate means "exclude
- * what we know is not Slovak", not "admit only what is confirmed Slovak", and
- * it tightens on its own as coverage grows.
+ * Admits only rows whose market has been established. It did not start that
+ * way: while most of autobazar.eu had no country, the predicate was "exclude
+ * what we know is not Slovak", because a hard equality would have dropped tens
+ * of thousands of rows we knew nothing bad about.
  *
- * Spelled out because the inverse mistake has been made here before: during
- * dedup an `IS DISTINCT FROM` over NULLs left 7 660 false merges. This is a
- * decision, not an oversight.
+ * Tightened once the unknown share fell to 1.70%, and the gate was worth
+ * waiting for — measured at the moment of the flip it cost 10 cohorts and 681
+ * cars, against the thousands it would have cost at 9%. pickCountryCoverageAlerts
+ * is what made that a measurement rather than a guess.
+ *
+ * A row with no country now falls out of the reference. That is the safe
+ * direction: an unplaced car cannot be said to price the Slovak market.
  */
 export const SLOVAK_MARKET_COUNTRY = 'SK';
 
 export function slovakMarketRaw(alias: string): SQL {
   const a = sql.raw(alias);
-  return sql`(${a}.country IS NULL OR ${a}.country = ${SLOVAK_MARKET_COUNTRY})`;
+  return sql`${a}.country = ${SLOVAK_MARKET_COUNTRY}`;
 }
 
 export function slovakMarket(country: SQL | unknown): SQL {
-  return sql`(${country} IS NULL OR ${country} = ${SLOVAK_MARKET_COUNTRY})`;
+  return sql`${country} = ${SLOVAK_MARKET_COUNTRY}`;
 }
 
 /**

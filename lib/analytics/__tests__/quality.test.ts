@@ -54,17 +54,15 @@ describe('plausiblePricedRaw', () => {
 });
 
 describe('slovakMarketRaw', () => {
-  it('lets an unknown country through', () => {
-    // autobazar.eu rows only gain a country when the rotation re-reads them.
-    // A hard equality here would drop tens of thousands of rows we know
-    // nothing bad about — the predicate excludes what is known foreign.
+  it('admits only an established market', () => {
+    // This started as "exclude what is known foreign", because most of
+    // autobazar.eu had no country and a hard equality would have dropped tens
+    // of thousands of rows we knew nothing bad about. It was tightened once
+    // the unknown share reached 1.70%, where the change cost 10 cohorts.
+    // An unplaced car cannot be said to price the Slovak market.
     const s = toSql(slovakMarketRaw('l'));
-    expect(s).toContain('country IS NULL');
-    expect(s).toContain('OR');
-  });
-
-  it('names the market it admits', () => {
-    expect(toSql(slovakMarketRaw('l'))).toContain('country');
+    expect(s).toContain('country');
+    expect(s).not.toContain('IS NULL');
   });
 });
 
