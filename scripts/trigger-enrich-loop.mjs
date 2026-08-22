@@ -7,6 +7,20 @@
 //       price / model. Loops until the whole set is walked once; re-run to
 //       retry any rows whose detail yielded nothing.
 
+// PARTITIONS MULTIPLY THE REQUEST RATE. lib/scraping/enrich.ts paces itself at
+// >= 1.5 s per fetch (or the robots Crawl-delay, whichever is larger), but that
+// budget is per process: running --modulo=3 sends three times as fast, and the
+// server side does not know the other two exist.
+//
+// On 2026-08-21 that cost us the source. A full 1 001-page catalogue walk plus
+// ~2.5 hours of three-stream detail enrichment against autobazar.sk in one
+// evening ended with the site refusing connections from the Vercel egress IP
+// entirely -- list pages and detail pages alike, while bazos.sk and
+// autobazar.eu from the same IP were unaffected. Nothing was lost (the page
+// cursor does not advance on an errored page) but the source went dark.
+//
+// Use one stream unless there is a reason not to, and never pair a full
+// catalogue walk with a mass enrichment of the same host on the same day.
 import { readFileSync } from 'node:fs';
 
 const source = process.argv[2];
